@@ -18,7 +18,7 @@ class BarcodeHandler(QObject):
     """
     barcode_detected = pyqtSignal(str)  # Barkod tespit edildiğinde sinyal gönderir
     
-    def __init__(self, input_timeout=50):
+    def __init__(self, input_timeout=100):  # Timeout değerini biraz artırdık
         """
         Args:
             input_timeout (int): Milisaniye cinsinden ardışık girişler arasındaki maksimum gecikme
@@ -63,7 +63,8 @@ class BarcodeHandler(QObject):
         """Arabellekteki veriyi işle ve sinyal gönder"""
         if self.buffer:
             barcode = self.buffer.strip()
-            if len(barcode) >= 4:  # Minimum barkod uzunluğu kontrolü
+            if len(barcode) >= 3:  # Minimum barkod uzunluğunu 3'e düşürdük, bazı ürün kodları kısa olabilir
                 self.barcode_detected.emit(barcode)
             self.buffer = ""
             self.last_key_time = 0
+
