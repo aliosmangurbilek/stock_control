@@ -1,0 +1,47 @@
+/* Koyu tema — temel gövde */
+QWidget {
+    background: #2b2b2b;
+    color: #e0e0e0;
+    font-size: 10pt;
+}
+
+/* Giriş kutuları ve tablolar */
+QLineEdit,
+QTableWidget,
+QTableView {
+    background: #3c3f41;
+    selection-background-color: #7f8c8d;
+    selection-color: #ffffff;
+    border: 1px solid #5c5c5c;
+    padding: 2px;
+}
+
+/* Butonlar */
+QPushButton {
+    background: #4e5052;
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+QPushButton:hover {
+    background: #5c5e60;
+}
+QPushButton:pressed {
+    background: #6d6f71;
+}
+
+/* Sekme çubuğu */
+QTabBar::tab {
+    background: #3c3f41;
+    padding: 6px 12px;
+}
+QTabBar::tab:selected {
+    background: #4e5052;
+}
+
+/* Başlık satırı */
+QHeaderView::section {
+    background: #4e5052;
+    padding: 4px;
+    border: none;
+    font-weight: bold;
+}

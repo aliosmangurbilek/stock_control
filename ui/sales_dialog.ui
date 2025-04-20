@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SalesDialog</class>
+ <widget class="QWidget" name="SalesDialog">
+  <property name="windowTitle">
+   <string>Satış</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QHBoxLayout" name="barcodeLayout">
+     <item>
+      <widget class="QLabel" name="labelScan">
+       <property name="text"><string>Barkod okutun:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLineEdit" name="lineEditBarcode"/>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QTableWidget" name="tableCart">
+     <column>
+      <property name="text"><string>Ürün</string></property>
+     </column>
+     <column>
+      <property name="text"><string>Adet</string></property>
+     </column>
+     <column>
+      <property name="text"><string>Birim</string></property>
+     </column>
+     <column>
+      <property name="text"><string>Toplam</string></property>
+     </column>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="labelTotal">
+     <property name="text"><string>Toplam: 0.00</string></property>
+     <property name="alignment"><set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set></property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
