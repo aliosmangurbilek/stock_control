@@ -14,12 +14,26 @@
       </widget>
      </item>
      <item>
-      <widget class="QLineEdit" name="lineEditBarcode"/>
+      <widget class="QLineEdit" name="lineEditBarcode">
+       <property name="placeholderText">
+        <string>Barkod okutun veya manuel girin...</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="pushButtonAdd">
+       <property name="text">
+        <string>Ekle</string>
+       </property>
+      </widget>
      </item>
     </layout>
    </item>
    <item>
     <widget class="QTableWidget" name="tableCart">
+     <property name="alternatingRowColors">
+      <bool>true</bool>
+     </property>
      <column>
       <property name="text"><string>Ürün</string></property>
      </column>
@@ -38,6 +52,20 @@
     <widget class="QLabel" name="labelTotal">
      <property name="text"><string>Toplam: 0.00</string></property>
      <property name="alignment"><set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set></property>
+     <property name="styleSheet"><string>font-weight: bold; font-size: 16px;</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="labelScanStatus">
+     <property name="text"><string>Hazır</string></property>
+     <property name="alignment"><set>Qt::AlignCenter</set></property>
+     <property name="styleSheet"><string>color: green;</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QPushButton" name="pushButtonComplete">
+     <property name="text"><string>Satışı Tamamla</string></property>
+     <property name="styleSheet"><string>font-weight: bold;</string></property>
     </widget>
    </item>
   </layout>

@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt
 from models import DatabaseManager
 from reports import export_daily_sales
 from sqlite3 import IntegrityError
+from barcode_handler import BarcodeHandler
 
 # -------- Ürünler sekmesi -------------------------------------------
 class ProductTab(QWidget):
@@ -55,6 +56,11 @@ class SearchProductTab(QWidget):
         self.search_edit.returnPressed.connect(self.search_products)
         search_layout.addWidget(self.search_edit)
         
+        # Barkod okuyucu entegrasyonu
+        self.barcode_handler = BarcodeHandler()
+        self.search_edit.installEventFilter(self.barcode_handler)
+        self.barcode_handler.barcode_detected.connect(self.handle_barcode)
+
         search_btn = QPushButton("Ara")
         search_btn.clicked.connect(self.search_products)
         search_layout.addWidget(search_btn)
@@ -73,6 +79,11 @@ class SearchProductTab(QWidget):
         self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.info_label)
     
+    def handle_barcode(self, barcode):
+        """Barkod tarayıcıdan gelen değer ile otomatik arama yap"""
+        self.search_edit.setText(barcode)
+        self.search_products()
+
     def search_products(self):
         """Ürün adı veya barkodu ile ürün arama"""
         query = self.search_edit.text().strip()
@@ -123,6 +134,12 @@ class AddProductTab(QWidget):
         form = QFormLayout(self)
         self.name_edit = QLineEdit()
         self.barcode_edit = QLineEdit()
+
+        # Barkod okuyucu desteği ekle
+        self.barcode_handler = BarcodeHandler()
+        self.barcode_edit.installEventFilter(self.barcode_handler)
+        self.barcode_handler.barcode_detected.connect(self.handle_barcode)
+
         self.location_edit = QLineEdit()
         self.price_edit = QDoubleSpinBox()
         self.price_edit.setMaximum(1_000_000)
@@ -139,6 +156,12 @@ class AddProductTab(QWidget):
         add_btn = QPushButton("Ürün Ekle")
         add_btn.clicked.connect(self.add_product)
         form.addRow(add_btn)
+
+    def handle_barcode(self, barcode):
+        """Barkod tarayıcıdan gelen değeri otomatik doldur"""
+        self.barcode_edit.setText(barcode)
+        # Imleç sonraki alana hareket etsin
+        self.location_edit.setFocus()
 
     def add_product(self):
         name = self.name_edit.text().strip()
@@ -188,6 +211,11 @@ class SalesTab(QWidget):
         self.barcode_edit.returnPressed.connect(self.scan)
         h.addWidget(self.barcode_edit)
 
+        # Barkod okuyucu entegrasyonu
+        self.barcode_handler = BarcodeHandler()
+        self.barcode_edit.installEventFilter(self.barcode_handler)
+        self.barcode_handler.barcode_detected.connect(self.handle_barcode)
+
         # Add button for users who prefer clicking
         add_btn = QPushButton("Ekle")
         add_btn.clicked.connect(self.scan)
@@ -204,12 +232,19 @@ class SalesTab(QWidget):
 
         # Toplam tutar etiketi
         self.total_lbl = QLabel("Toplam: 0.00")
+        self.total_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
         v.addWidget(self.total_lbl)
 
         # Satışı Tamamla butonu
         complete_btn = QPushButton("Satışı Tamamla")
         complete_btn.clicked.connect(self.complete_sale)
         v.addWidget(complete_btn)
+
+    def handle_barcode(self, barcode):
+        """Barkod tarayıcıdan gelen değeri hemen işle"""
+        self.barcode_edit.setText(barcode)
+        self.scan()
+        self.barcode_edit.setFocus()  # İmleci tekrar barkod alanına getir
 
     def scan(self):
         code = self.barcode_edit.text().strip()
@@ -270,6 +305,12 @@ class StockInTab(QWidget):
 
         form = QFormLayout(self)
         self.barcode_edit = QLineEdit()
+
+        # Barkod okuyucu desteği ekle
+        self.barcode_handler = BarcodeHandler()
+        self.barcode_edit.installEventFilter(self.barcode_handler)
+        self.barcode_handler.barcode_detected.connect(self.handle_barcode)
+
         self.qty_spin = QSpinBox(); self.qty_spin.setRange(1, 9999)
 
         form.addRow("Barkod", self.barcode_edit)
@@ -278,6 +319,19 @@ class StockInTab(QWidget):
         add_btn = QPushButton("Stok Ekle")
         add_btn.clicked.connect(self.add_stock)
         form.addRow(add_btn)
+
+    def handle_barcode(self, barcode):
+        """Barkod tarayıcıdan gelen değeri otomatik doldur"""
+        self.barcode_edit.setText(barcode)
+
+        # Otomatik ürün bilgilerini getir
+        product = self.db.find_product_by_barcode(barcode)
+        if product:
+            # Ürün bulunduğunda, imleci miktara taşı
+            self.qty_spin.setFocus()
+            self.qty_spin.selectAll()
+        else:
+            QMessageBox.warning(self, "Bulunamadı", "Barkod kayıtlı değil.")
 
     def add_stock(self):
         code = self.barcode_edit.text().strip()
@@ -483,4 +537,5 @@ class MainWindow(QMainWindow):
         """Pencere kapatıldığında veritabanı bağlantısını kapat"""
         self.db.close()
         event.accept()
+
 
