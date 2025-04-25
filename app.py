@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication              # QApplication ana olay döngüsünü yönetir :contentReference[oaicite:1]{index=1}
 from controllers import MainWindow
+from models import DatabaseManager
 
 def main() -> None:
     app = QApplication(sys.argv)                      # PyQt‑6'da exec_() yerine exec() kullanılır :contentReference[oaicite:2]{index=2}
@@ -18,6 +19,18 @@ def main() -> None:
     style_file = Path("resources/style.qss")
     if style_file.exists():
         app.setStyleSheet(style_file.read_text())
+
+    # Veritabanı bağlantısını kuralım ve kontrol edelim 
+    db = DatabaseManager()
+    
+    # Bağlantıyı test et
+    try:
+        db.list_products()
+        db.refresh_connection()  # Bağlantıyı yenile
+    except Exception as e:
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.critical(None, "Veritabanı Hatası", f"Veritabanına bağlanırken hata: {str(e)}")
+        sys.exit(1)
 
     win = MainWindow()                                # Ana pencere: sekmeli yapı :contentReference[oaicite:3]{index=3}
     win.resize(900, 600)

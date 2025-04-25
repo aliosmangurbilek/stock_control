@@ -1,145 +1,132 @@
 """
-test_barcode_handler.py
-BarcodeHandler sınıfını test etmek için kullanılan test uygulaması.
+barcode_test_suite.py
+Farklı barkod alanlarını otomatik test eden uygulama.
 """
 
-import sys
+import pyautogui
 import time
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
-    QWidget, QLabel, QLineEdit, QPushButton, QTextEdit
-)
-from PyQt6.QtCore import Qt, QEvent
-from PyQt6.QtGui import QKeyEvent
-from barcode_handler import BarcodeHandler
+import sys
 
+class BarcodeTestSuite:
+    """Barkod tarama özelliklerini kapsamlı olarak test eder"""
 
-class BarcodeSimulator:
-    """Barkod tarayıcısını simüle eden sınıf"""
-    
-    @staticmethod
-    def simulate_barcode_scan(target_widget, barcode_text):
-        """
-        Verilen widget'a barkod tarayıcı gibi hızlı karakter gönderir
-        
-        Args:
-            target_widget: Girdinin gönderileceği widget (QLineEdit)
-            barcode_text: Simüle edilecek barkod metni
-        """
-        target_widget.clear()
-        target_widget.setFocus()
-        
-        # Barkod metnini hızlıca karakterler halinde gönder
-        for char in barcode_text:
-            # Her karakter için bir klavye olayı oluştur
-            event = QKeyEvent(
-                QEvent.Type.KeyPress,
-                ord(char),
-                Qt.KeyboardModifier.NoModifier,
-                char
-            )
-            # Widget'a olayı gönder
-            QApplication.sendEvent(target_widget, event)
-            # Çok kısa bir gecikme - gerçek tarayıcıyı simüle etmek için
-            QApplication.processEvents()
-            time.sleep(0.01)  # 10ms delay
-        
-        # Son olarak Enter tuşu gönder (çoğu barkod okuyucu sonunda Enter gönderir)
-        enter_event = QKeyEvent(
-            QEvent.Type.KeyPress,
-            Qt.Key.Key_Return,
-            Qt.KeyboardModifier.NoModifier
-        )
-        QApplication.sendEvent(target_widget, enter_event)
-
-
-class BarcodeTestWindow(QMainWindow):
-    """BarcodeHandler test penceresi"""
-    
     def __init__(self):
-        super().__init__()
-        
-        self.setWindowTitle("Barkod Okuyucu Test Uygulaması")
-        self.setGeometry(100, 100, 600, 400)
-        
-        # Ana widget ve düzen
-        main_widget = QWidget()
-        layout = QVBoxLayout(main_widget)
-        
-        # Test açıklama etiketi
-        layout.addWidget(QLabel(
-            "Bu uygulama, barkod okuyucu olmadan BarcodeHandler sınıfını test etmenizi sağlar.\n"
-            "Normal klavye girişi ile barkod tarayıcı girişi arasındaki farkı gösterir."
-        ))
-        
-        # Normal giriş alanı
-        layout.addWidget(QLabel("Normal Giriş (BarcodeHandler'sız):"))
-        self.normal_input = QLineEdit()
-        layout.addWidget(self.normal_input)
-        
-        # Barkod giriş alanı
-        layout.addWidget(QLabel("Barkod Giriş (BarcodeHandler'lı):"))
-        self.barcode_input = QLineEdit()
-        layout.addWidget(self.barcode_input)
-        
-        # Barkod handler'ı bağla
-        self.barcode_handler = BarcodeHandler()
-        self.barcode_input.installEventFilter(self.barcode_handler)
-        self.barcode_handler.barcode_detected.connect(self.on_barcode_detected)
-        
-        # Test barkodları
-        test_barcode_layout = QHBoxLayout()
-        test_barcode_layout.addWidget(QLabel("Test Barkodları:"))
-        
-        # Test barkodlarını oluştur
-        test_barcodes = ["1234567890128", "5901234123457", "4007817525074"]
-        for barcode in test_barcodes:
-            btn = QPushButton(barcode)
-            btn.clicked.connect(lambda checked=False, code=barcode: 
-                               BarcodeSimulator.simulate_barcode_scan(self.barcode_input, code))
-            test_barcode_layout.addWidget(btn)
-        
-        layout.addLayout(test_barcode_layout)
-        
-        # Özel barkod test alanı
-        custom_layout = QHBoxLayout()
-        custom_layout.addWidget(QLabel("Özel Barkod:"))
-        self.custom_barcode = QLineEdit()
-        custom_layout.addWidget(self.custom_barcode)
-        
-        test_btn = QPushButton("Test Et")
-        test_btn.clicked.connect(self.test_custom_barcode)
-        custom_layout.addWidget(test_btn)
-        
-        layout.addLayout(custom_layout)
-        
-        # Log alanı
-        layout.addWidget(QLabel("Tespit Edilen Barkodlar:"))
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        layout.addWidget(self.log_text)
-        
-        # Manuel ve otomatik giriş arasındaki farkı göstermek için
-        layout.addWidget(QLabel(
-            "Not: Normal giriş yaptığınızda bir sinyal oluşmaz. "
-            "Barkod simülasyonu yaptığınızda BarcodeHandler sinyali yakalar."
-        ))
-        
-        self.setCentralWidget(main_widget)
-    
-    def test_custom_barcode(self):
-        """Özel barkod test butonu için işleyici"""
-        barcode = self.custom_barcode.text().strip()
-        if barcode:
-            BarcodeSimulator.simulate_barcode_scan(self.barcode_input, barcode)
-    
-    def on_barcode_detected(self, barcode):
-        """Barkod algılandığında çağrılan fonksiyon"""
-        self.log_text.append(f"Barkod tespit edildi: {barcode}")
-        
+        self.test_barcodes = [
+            "1234567890128",  # EAN-13 formatında geçerli barkod
+            "5901234123457",  # Başka bir EAN-13 örneği
+            "4007817525074",  # Gerçek bir ürün barkodu
+            "TEST-BARCODE-123"  # Alfanumerik test barkodu
+        ]
+
+        # Test için hareket sürelerini azaltalım
+        pyautogui.PAUSE = 0.1
+
+    def simulate_barcode_scan(self, barcode):
+        """Barkod tarama simülasyonu yapar"""
+        # Çok kısa gecikme ile karakterleri gönder
+        for char in barcode:
+            pyautogui.write(char, interval=0.01)
+
+        # Enter tuşu gönder
+        time.sleep(0.1)
+        pyautogui.press('enter')
+
+    def run_tests(self):
+        """Farklı sekmelerde barkod testlerini çalıştırır"""
+        print("Stok Yönetim Sistemi Barkod Test Programı başlatılıyor...")
+        time.sleep(1)
+
+        # Uygulamayı başlat (yolu uygun şekilde değiştirin)
+        print("Uygulama başlatılıyor...")
+        pyautogui.hotkey('alt', 'tab')  # Uygulamaya geçiş yap
+        time.sleep(1)
+
+        # Test sekmeleri - sırasıyla test edeceğiz
+        self.test_search_tab()
+        self.test_add_product_tab()
+        self.test_sales_tab()
+        self.test_stock_in_tab()
+
+        print("Tüm testler tamamlandı!")
+
+    def test_search_tab(self):
+        """Ürün Arama sekmesinde barkod taramayı test et"""
+        print("Ürün Arama sekmesi testi başlıyor...")
+
+        # Ürün Arama sekmesine geç
+        pyautogui.hotkey('ctrl', 'tab')  # Bir sonraki sekmeye geç
+        time.sleep(0.5)
+
+        # Barkod alanını seç ve odakla
+        pyautogui.click(x=300, y=100)  # Uygulama penceresine göre uygun koordinat belirleyin
+
+        # Test barkoduyla tarama simülasyonu yap
+        self.simulate_barcode_scan(self.test_barcodes[0])
+        time.sleep(1)  # Sonucun görüntülenmesi için bekle
+
+        print("Ürün Arama sekmesi testi tamamlandı.")
+
+    def test_add_product_tab(self):
+        """Ürün Ekle sekmesinde barkod taramayı test et"""
+        print("Ürün Ekle sekmesi testi başlıyor...")
+
+        # Ürün Ekle sekmesine geç
+        for _ in range(2):  # İki sekme ileri
+            pyautogui.hotkey('ctrl', 'tab')
+        time.sleep(0.5)
+
+        # Barkod alanını seç
+        pyautogui.press('tab')  # Adı alanından sonra Tab ile barkod alanına geç
+
+        # Test barkoduyla tarama simülasyonu yap
+        self.simulate_barcode_scan(self.test_barcodes[1])
+        time.sleep(1)
+
+        print("Ürün Ekle sekmesi testi tamamlandı.")
+
+    def test_sales_tab(self):
+        """Satış sekmesinde barkod taramayı test et"""
+        print("Satış sekmesi testi başlıyor...")
+
+        # Satış sekmesine geç
+        pyautogui.hotkey('ctrl', 'tab')
+        time.sleep(0.5)
+
+        # Barkod alanını seç
+        pyautogui.click(x=300, y=100)  # Uygulama penceresine göre uygun koordinat belirleyin
+
+        # Test barkoduyla tarama simülasyonu yap
+        self.simulate_barcode_scan(self.test_barcodes[2])
+        time.sleep(1)
+
+        print("Satış sekmesi testi tamamlandı.")
+
+    def test_stock_in_tab(self):
+        """Stok Girişi sekmesinde barkod taramayı test et"""
+        print("Stok Girişi sekmesi testi başlıyor...")
+
+        # Stok Girişi sekmesine geç
+        pyautogui.hotkey('ctrl', 'tab')
+        time.sleep(0.5)
+
+        # Barkod alanını seç
+        pyautogui.click(x=300, y=100)  # Uygulama penceresine göre uygun koordinat belirleyin
+
+        # Test barkoduyla tarama simülasyonu yap
+        self.simulate_barcode_scan(self.test_barcodes[3])
+        time.sleep(1)
+
+        print("Stok Girişi sekmesi testi tamamlandı.")
+
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = BarcodeTestWindow()
-    window.show()
-    sys.exit(app.exec())
+    # Kullanıcıya hazırlık süresi ver
+    print("Barkod tarama testleri 5 saniye içinde başlayacak...")
+    print("Lütfen Stok Yönetim Sistemi uygulamasını açın.")
+    for i in range(5, 0, -1):
+        print(f"{i}...")
+        time.sleep(1)
+
+    # Testleri başlat
+    test_suite = BarcodeTestSuite()
+    test_suite.run_tests()

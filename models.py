@@ -16,6 +16,7 @@ class DatabaseManager:
     """SQLite tabanlı basit DAO (Data‑Access Object)."""
 
     def __init__(self, db_path: Path = DB_PATH):
+        self.db_path = db_path
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row
         self._ensure_schema()     # tablo yoksa oluştur
@@ -32,10 +33,20 @@ class DatabaseManager:
                 barcode     TEXT    UNIQUE,
                 location    TEXT,
                 unit_price  REAL    DEFAULT 0.0,
+                initial_price REAL  DEFAULT 0.0,
                 created_at  TEXT    DEFAULT CURRENT_TIMESTAMP
             );
             """
         )
+        # Mevcut bir tablo varsa initial_price sütununu ekle
+        try:
+            cur.execute("SELECT initial_price FROM Product LIMIT 1")
+        except sqlite3.OperationalError:
+            # initial_price sütunu yoksa ekle
+            cur.execute("ALTER TABLE Product ADD COLUMN initial_price REAL DEFAULT 0.0")
+            # Varolan ürünler için initial_price'ı unit_price ile aynı yap
+            cur.execute("UPDATE Product SET initial_price = unit_price WHERE initial_price = 0.0")
+
         # Stok hareketleri
         cur.execute(
             """
@@ -44,26 +55,53 @@ class DatabaseManager:
                 product_id  INTEGER REFERENCES Product (id),
                 change      INTEGER,
                 reason      TEXT    CHECK(reason IN ('SALE','PURCHASE','ADJUST')),
+                purchase_price REAL DEFAULT NULL,
                 timestamp   TEXT    DEFAULT CURRENT_TIMESTAMP
             );
             """
         )
+        # Mevcut bir tablo varsa purchase_price sütununu ekle
+        try:
+            cur.execute("SELECT purchase_price FROM StockMovement LIMIT 1")
+        except sqlite3.OperationalError:
+            cur.execute("ALTER TABLE StockMovement ADD COLUMN purchase_price REAL DEFAULT NULL")
+        
         self.conn.commit()
+
+    # ---------- Veritabanı Yönetimi -----------------------------------
+    def refresh_connection(self):
+        """Veritabanı bağlantısını yeniler"""
+        try:
+            # Mevcut bağlantıyı kapat
+            self.conn.close()
+            # Bağlantıyı yeniden aç
+            self.conn = sqlite3.connect(self.db_path)
+            self.conn.row_factory = sqlite3.Row
+            return True
+        except sqlite3.Error:
+            return False
 
     # ---------- CRUD: Product ----------------------------------------
     def add_product(self, name: str, barcode: str,
                     location: str, unit_price: float) -> int:
         cur = self.conn.cursor()
+        # initial_price ile unit_price aynı değere sahip olacak ilk başta
         cur.execute(
-            "INSERT INTO Product(name, barcode, location, unit_price)"
-            " VALUES (?,?,?,?)",
-            (name, barcode, location, unit_price),
+            "INSERT INTO Product(name, barcode, location, unit_price, initial_price)"
+            " VALUES (?,?,?,?,?)",
+            (name, barcode, location, unit_price, unit_price),
         )
         self.conn.commit()
         return cur.lastrowid
 
     def list_products(self) -> List[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM Product").fetchall()
+
+    def get_product_by_id(self, product_id: int) -> Optional[sqlite3.Row]:
+        """Ürünü ID ile getirir"""
+        return self.conn.execute(
+            "SELECT * FROM Product WHERE id=?", (product_id,)
+        ).fetchone()
 
     def find_product_by_barcode(self, code: str) -> Optional[sqlite3.Row]:
         return self.conn.execute(
@@ -89,13 +127,40 @@ class DatabaseManager:
 
     # ---------- Stok işlemleri ---------------------------------------
     def change_stock(self, product_id: int, qty: int,
-                     reason: str = "SALE") -> None:
+                     reason: str = "SALE", purchase_price: float = None) -> None:
         self.conn.execute(
-            "INSERT INTO StockMovement(product_id, change, reason)"
-            " VALUES (?,?,?)",
-            (product_id, qty, reason),
+            "INSERT INTO StockMovement(product_id, change, reason, purchase_price)"
+            " VALUES (?,?,?,?)",
+            (product_id, qty, reason, purchase_price),
         )
         self.conn.commit()
+        
+    def update_unit_price(self, product_id: int, new_price: float) -> bool:
+        """
+        Ürünün güncel birim fiyatını günceller
+        
+        Args:
+            product_id: Güncellenecek ürünün ID'si
+            new_price: Yeni birim fiyat
+            
+        Returns:
+            bool: Güncelleme başarılı ise True, değilse False
+        """
+        try:
+            cur = self.conn.cursor()
+            cur.execute(
+                "UPDATE Product SET unit_price = ? WHERE id = ?",
+                (new_price, product_id)
+            )
+            self.conn.commit()
+            # Değişikliklerin veritabanına yazıldığından emin olmak için bağlantıyı yeniliyoruz
+            self.refresh_connection()
+            # Güncellemeyi doğrula
+            updated = self.get_product_by_id(product_id)
+            return updated and abs(updated["unit_price"] - new_price) < 0.01
+        except sqlite3.Error:
+            self.conn.rollback()
+            return False
 
     def get_stock_level(self, product_id: int) -> int:
         row = self.conn.execute(
