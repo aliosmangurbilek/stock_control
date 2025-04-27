@@ -7,13 +7,15 @@ from PyQt6.QtWidgets import (
     QWidget, QTabWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFormLayout, QTableWidget, QTableWidgetItem, QMessageBox,
     QDoubleSpinBox, QSpinBox, QComboBox, QMainWindow, QFileDialog,
-    QCheckBox, QGroupBox
+    QCheckBox, QGroupBox, QHeaderView
 )
 from PyQt6.QtCore import Qt
 from models import DatabaseManager
 from reports import export_daily_sales
 from sqlite3 import IntegrityError
 from barcode_handler import BarcodeHandler
+# Fix the datetime import to properly access strptime
+from datetime import datetime
 
 # -------- Ürünler sekmesi -------------------------------------------
 class ProductTab(QWidget):
@@ -594,6 +596,165 @@ class ReportTab(QWidget):
             )
 
 
+# -------- Fiyat Takibi sekmesi -------------------------------------
+class PriceHistoryTab(QWidget):
+    def __init__(self, db: DatabaseManager):
+        super().__init__()
+        self.db = db
+        self.current_product_id = None
+
+        layout = QVBoxLayout(self)
+
+        # Arama alanı
+        search_layout = QHBoxLayout()
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Ürün adı veya barkod ile arama yapın...")
+        self.search_edit.returnPressed.connect(self.search_products)
+        search_layout.addWidget(self.search_edit)
+
+        # Barkod okuyucu entegrasyonu
+        self.barcode_handler = BarcodeHandler()
+        self.search_edit.installEventFilter(self.barcode_handler)
+        self.barcode_handler.barcode_detected.connect(self.handle_barcode)
+
+        search_btn = QPushButton("Ara")
+        search_btn.clicked.connect(self.search_products)
+        search_layout.addWidget(search_btn)
+
+        layout.addLayout(search_layout)
+
+        # Ürün seçme listesi
+        self.product_combo = QComboBox()
+        self.product_combo.setMinimumWidth(300)
+        self.product_combo.currentIndexChanged.connect(self.product_selected)
+        layout.addWidget(QLabel("Ürün Seçin:"))
+        layout.addWidget(self.product_combo)
+
+        # Ürün bilgisi
+        self.product_info = QLabel("Lütfen bir ürün seçin")
+        layout.addWidget(self.product_info)
+
+        # Fiyat geçmişi tablosu
+        layout.addWidget(QLabel("Fiyat Geçmişi:"))
+        self.table = QTableWidget(0, 3)
+        self.table.setHorizontalHeaderLabels(["Tarih", "Alış Fiyatı", "Değişim"])
+        layout.addWidget(self.table)
+
+        # Tablo ayarları
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+
+    def handle_barcode(self, barcode):
+        """Barkod tarayıcıdan gelen değeri işle"""
+        self.search_edit.setText(barcode)
+        self.search_products()
+
+    def search_products(self):
+        """Ürün ara ve combo box'a doldur"""
+        query = self.search_edit.text().strip()
+        if not query:
+            QMessageBox.information(self, "Bilgi", "Lütfen bir arama terimi girin.")
+            return
+
+        products = self.db.search_products_for_price_history(query)
+
+        self.product_combo.clear()
+        if not products:
+            self.product_combo.addItem("Sonuç bulunamadı", -1)
+            self.product_info.setText(f"'{query}' ile eşleşen ürün bulunamadı.")
+            return
+
+        for product in products:
+            self.product_combo.addItem(
+                f"{product['name']} (Barkod: {product['barcode']})",
+                product['id']
+            )
+
+        self.product_combo.setCurrentIndex(0)  # İlk ürünü seç
+
+    def product_selected(self, index):
+        """Seçilen ürünün fiyat geçmişini göster"""
+        if index < 0 or self.product_combo.count() == 0:
+            return
+
+        product_id = self.product_combo.currentData()
+        if product_id == -1:  # "Sonuç bulunamadı" durumu
+            return
+
+        self.current_product_id = product_id
+
+        # Ürün bilgisini getir
+        product = self.db.get_product_by_id(product_id)
+        if not product:
+            return
+
+        # Ürün bilgisini görüntüle
+        self.product_info.setText(
+            f"<b>{product['name']}</b><br>"
+            f"İlk Alış Fiyatı: <b>{product['initial_price']:.2f} TL</b><br>"
+            f"Güncel Birim Fiyat: <b>{product['unit_price']:.2f} TL</b>"
+        )
+
+        # Fiyat geçmişini getir
+        self.show_price_history()
+
+    def show_price_history(self):
+        """Seçilen ürünün fiyat geçmişini tabloda göster"""
+        self.table.setRowCount(0)
+
+        if not self.current_product_id:
+            return
+
+        price_history = self.db.get_product_price_history(self.current_product_id)
+
+        if not price_history:
+            self.table.setRowCount(1)
+            self.table.setItem(0, 0, QTableWidgetItem("Bu ürün için fiyat geçmişi bulunamadı."))
+            self.table.setSpan(0, 0, 1, 3)
+            return
+
+        # Fiyat değişimlerini hesapla ve sırala
+        previous_price = price_history[-1]['purchase_price'] if len(price_history) > 0 else None
+
+        for row_idx, item in enumerate(price_history):
+            self.table.insertRow(row_idx)
+
+            # Tarih formatla
+            date_str = datetime.strptime(item['timestamp'], "%Y-%m-%d %H:%M:%S").strftime("%d.%m.%Y %H:%M")
+            self.table.setItem(row_idx, 0, QTableWidgetItem(date_str))
+
+            # Fiyat
+            price_item = QTableWidgetItem(f"{item['purchase_price']:.2f} TL")
+            price_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row_idx, 1, price_item)
+
+            # Değişim
+            if row_idx < len(price_history) - 1:
+                next_price = price_history[row_idx + 1]['purchase_price']
+                if next_price > 0:
+                    price_diff = item['purchase_price'] - next_price
+                    percent_change = (price_diff / next_price) * 100
+
+                    # Değişim miktarı ve yüzde
+                    change_text = f"{price_diff:+.2f} TL ({percent_change:+.2f}%)"
+                    change_item = QTableWidgetItem(change_text)
+
+                    # Artış veya azalış rengini ayarla
+                    if price_diff > 0:
+                        change_item.setForeground(Qt.GlobalColor.darkGreen)
+                    elif price_diff < 0:
+                        change_item.setForeground(Qt.GlobalColor.red)
+
+                    change_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                    self.table.setItem(row_idx, 2, change_item)
+
+            # İlk satırsa değişim bilgisi olmaz
+            if row_idx == len(price_history) - 1:
+                self.table.setItem(row_idx, 2, QTableWidgetItem("İlk alım"))
+
+
 # -------- Ana Pencere ----------------------------------------
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -631,6 +792,10 @@ class MainWindow(QMainWindow):
         self.delete_tab = DeleteProductTab(self.db, self.product_tab.refresh)
         self.tabs.addTab(self.delete_tab, "Ürün Sil")
 
+        # Fiyat Takibi sekmesi (yeni eklenen sekme)
+        self.price_history_tab = PriceHistoryTab(self.db)
+        self.tabs.addTab(self.price_history_tab, "Fiyat Takibi")
+
         # Rapor sekmesi
         self.report_tab = ReportTab(self.db)
         self.tabs.addTab(self.report_tab, "Raporlar")
@@ -642,11 +807,10 @@ class MainWindow(QMainWindow):
         """Sekme değiştiğinde gerekli yenilemeleri yap"""
         if index == 0:  # Ürünler sekmesi
             self.product_tab.refresh()
-        elif index == 6:  # Rapor sekmesi
+        elif index == 7:  # Rapor sekmesi (index 7 oldu çünkü yeni sekme eklendi)
             self.report_tab.refresh_report()
 
     def closeEvent(self, event):
         """Pencere kapatıldığında veritabanı bağlantısını kapat"""
         self.db.close()
         event.accept()
-

@@ -190,6 +190,49 @@ class DatabaseManager:
         )                         # sorgu örnekleri :contentReference[oaicite:1]{index=1}
         return cur.fetchall()
 
+    # ---------- Fiyat Takibi -----------------------------------------
+    def get_product_price_history(self, product_id: int) -> List[sqlite3.Row]:
+        """
+        Bir ürünün fiyat geçmişini getirir.
+        Sadece alış hareketlerindeki (PURCHASE) fiyat değişimlerini içerir.
+        """
+        return self.conn.execute(
+            """
+            SELECT 
+                sm.timestamp,
+                sm.purchase_price,
+                p.name as product_name
+            FROM StockMovement sm
+            JOIN Product p ON p.id = sm.product_id
+            WHERE sm.product_id = ? 
+              AND sm.reason = 'PURCHASE'
+              AND sm.purchase_price IS NOT NULL
+            ORDER BY sm.timestamp DESC
+            """,
+            (product_id,)
+        ).fetchall()
+
+    def search_products_for_price_history(self, query: str) -> List[sqlite3.Row]:
+        """
+        Ürünleri ada veya barkoda göre arar
+        """
+        query = f'%{query}%'
+        return self.conn.execute(
+            """
+            SELECT 
+                id, 
+                name, 
+                barcode, 
+                unit_price,
+                initial_price
+            FROM Product 
+            WHERE name LIKE ? OR barcode LIKE ?
+            ORDER BY name
+            """,
+            (query, query)
+        ).fetchall()
+
     # ---------- Kapat -------------------------------------------------
     def close(self):
         self.conn.close()
+
