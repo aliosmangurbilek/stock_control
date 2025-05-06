@@ -186,7 +186,7 @@ class AddProductTab(QWidget):
             product_id = self.db.add_product(name, barcode, location, price)
 
             # İlk stok eklemesi
-            if quantity > 0:
+            if (quantity > 0):
                 self.db.change_stock(product_id, quantity, "PURCHASE", price)
 
             self.refresh_callback()
@@ -209,6 +209,7 @@ class SalesTab(QWidget):
         super().__init__()
         self.db = db
         self.cart = {}
+        self.processing_barcode = False  # İşlem yapılıp yapılmadığını kontrol eden bayrak
 
         v = QVBoxLayout(self)
 
@@ -216,7 +217,8 @@ class SalesTab(QWidget):
         h = QHBoxLayout()
         h.addWidget(QLabel("Barkod okutun:"))
         self.barcode_edit = QLineEdit()
-        self.barcode_edit.returnPressed.connect(self.scan)
+        # returnPressed sinyalini kaldırıyoruz, sadece barkod handler kullanacağız
+        # self.barcode_edit.returnPressed.connect(self.scan)
         h.addWidget(self.barcode_edit)
 
         # Barkod okuyucu entegrasyonu
@@ -236,7 +238,21 @@ class SalesTab(QWidget):
         self.table.setHorizontalHeaderLabels(
             ["Ürün", "Adet", "Birim", "Toplam"]
         )
+        # Tablo seçim davranışını satır bazlı yap
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         v.addWidget(self.table)
+
+        # Butonlar için layout
+        buttons_layout = QHBoxLayout()
+        
+        # Ürün silme butonu
+        remove_btn = QPushButton("Seçilen Ürünü Çıkar")
+        remove_btn.setStyleSheet("background-color: #ff9800; color: white;")
+        remove_btn.clicked.connect(self.remove_selected_item)
+        buttons_layout.addWidget(remove_btn)
+        
+        v.addLayout(buttons_layout)
 
         # Toplam tutar etiketi
         self.total_lbl = QLabel("Toplam: 0.00")
@@ -250,13 +266,26 @@ class SalesTab(QWidget):
 
     def handle_barcode(self, barcode):
         """Barkod tarayıcıdan gelen değeri hemen işle"""
-        self.barcode_edit.setText(barcode)
-        self.scan()
-        self.barcode_edit.setFocus()  # İmleci tekrar barkod alanına getir
+        if self.processing_barcode:  # Eğer zaten işleme devam ediyorsa çık
+            return
+
+        self.processing_barcode = True  # İşlem başladı
+        try:
+            self.barcode_edit.setText(barcode)
+            self.scan()
+        finally:
+            self.processing_barcode = False  # İşlem bitti
+            self.barcode_edit.setFocus()  # İmleci tekrar barkod alanına getir
 
     def scan(self):
+        if self.processing_barcode and not self.sender():  # Eğer zaten işleniyor ve doğrudan çağrıldıysa
+            return
+
         code = self.barcode_edit.text().strip()
         self.barcode_edit.clear()
+
+        if not code:
+            return
 
         product = self.db.find_product_by_barcode(code)
         if not product:
@@ -279,6 +308,42 @@ class SalesTab(QWidget):
         self.cart.setdefault(pid, {"name": name, "price": price, "qty": 0})
         self.cart[pid]["qty"] += 1
         self.refresh()
+
+    def remove_selected_item(self):
+        """Seçilen ürünü sepetten çıkar ve stok durumunu güncelle"""
+        selected_row = self.table.currentRow()
+        if selected_row < 0:
+            QMessageBox.information(self, "Seçim Yok", "Lütfen sepetten çıkarılacak bir ürün seçin.")
+            return
+            
+        # Seçilen ürünün adını al
+        product_name = self.table.item(selected_row, 0).text()
+        
+        # Ürün ID'sini bul
+        product_id = None
+        for pid, item in self.cart.items():
+            if item["name"] == product_name:
+                product_id = pid
+                break
+                
+        if product_id is None:
+            QMessageBox.warning(self, "Hata", "Seçilen ürün bulunamadı.")
+            return
+            
+        # Sepetteki miktarı azalt
+        self.cart[product_id]["qty"] -= 1
+        
+        # Eğer miktar 0'a düştüyse, ürünü tamamen sepetten çıkar
+        if self.cart[product_id]["qty"] <= 0:
+            del self.cart[product_id]
+            
+        # Stok durumunu düzelt (satışı iptal et)
+        self.db.change_stock(product_id, 1, "ADJUST")
+        
+        # Tabloyu güncelle
+        self.refresh()
+        
+        QMessageBox.information(self, "Başarılı", f"'{product_name}' ürünü sepetten çıkarıldı.")
 
     def refresh(self):
         self.table.setRowCount(0)
@@ -392,7 +457,7 @@ class StockInTab(QWidget):
         qty = self.qty_spin.value()
         new_price = self.new_price_spin.value()
         product_id = self.current_product["id"]
-        
+
         # Stok girişini yap ve yeni fiyatı kaydet
         try:
             # Önce stok girişini yap
@@ -402,7 +467,7 @@ class StockInTab(QWidget):
                 "PURCHASE",
                 new_price
             )
-            
+
             # Birim fiyatı güncelleme onaylandıysa
             price_updated = False
             if self.update_price_check.isChecked():
@@ -412,27 +477,27 @@ class StockInTab(QWidget):
                 else:
                     # Veritabanı bağlantısını yenilemeyi dene
                     self.db.refresh_connection()
-                    
+
                     # Tekrar güncelleme işlemini dene
                     if self.db.update_unit_price(product_id, new_price):
                         price_updated = True
                     else:
                         QMessageBox.warning(
-                            self, 
-                            "Uyarı", 
+                            self,
+                            "Uyarı",
                             "Fiyat güncelleme işlemi başarısız oldu. Veri kaydedildi ancak fiyat güncellenmedi."
                         )
-            
+
             # İşlem başarılı mesajı
             message = f"{qty} adet stok eklendi."
             if price_updated:
                 message += f"\nBirim fiyat {new_price:.2f} TL olarak güncellendi."
-                
+
             QMessageBox.information(self, "Tamam", message)
-            
+
             # Tüm UI bileşenlerini güncelle
             self.force_ui_update()
-            
+
         except Exception as e:
             QMessageBox.critical(self, "Hata", f"İşlem sırasında bir hata oluştu: {str(e)}")
             return
@@ -449,15 +514,15 @@ class StockInTab(QWidget):
         """UI'daki tüm ilgili bileşenleri günceller"""
         # Ana pencereye referans al
         main_window = self.window()
-        
+
         # Ürünler sekmesini güncelle
         if hasattr(main_window, 'product_tab'):
             main_window.product_tab.refresh()
-        
+
         # Veritabanı bağlantısını yenile ve diğer sekmeleri güncelle
         self.db.refresh_connection()
         self.refresh_products()
-        
+
         # Arama sekmesini de güncelle
         if hasattr(main_window, 'search_tab') and main_window.search_tab.search_edit.text():
             main_window.search_tab.search_products()
@@ -469,22 +534,39 @@ class DeleteProductTab(QWidget):
         super().__init__()
         self.db = db
         self.refresh_products = refresh_products
-        self.products = []
-
+        self.current_product = None  # Silme için seçilen ürünü tutacak değişken
+        
         layout = QVBoxLayout(self)
         
-        # Ürün seçme combobox'ı
-        form = QFormLayout()
-        self.product_combo = QComboBox()
-        self.product_combo.setMinimumWidth(300)
-        form.addRow("Silinecek Ürün:", self.product_combo)
-        layout.addLayout(form)
+        # Arama alanı
+        search_layout = QHBoxLayout()
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Ürün adı veya barkod ile arama yapın...")
+        self.search_edit.returnPressed.connect(self.search_product)
+        search_layout.addWidget(self.search_edit)
         
-        # Silme butonu
-        delete_btn = QPushButton("Ürünü Sil")
-        delete_btn.setStyleSheet("background-color: #f44336; color: white;")
-        delete_btn.clicked.connect(self.delete_product)
-        layout.addWidget(delete_btn)
+        # Barkod okuyucu entegrasyonu
+        self.barcode_handler = BarcodeHandler()
+        self.search_edit.installEventFilter(self.barcode_handler)
+        self.barcode_handler.barcode_detected.connect(self.handle_barcode)
+        
+        search_btn = QPushButton("Ara")
+        search_btn.clicked.connect(self.search_product)
+        search_layout.addWidget(search_btn)
+        
+        layout.addLayout(search_layout)
+        
+        # Ürün bilgisi etiketi
+        self.product_info = QLabel("Silmek için bir ürün arayın")
+        self.product_info.setStyleSheet("font-weight: bold; padding: 10px;")
+        layout.addWidget(self.product_info)
+        
+        # Silme butonu - başlangıçta devre dışı
+        self.delete_btn = QPushButton("Ürünü Sil")
+        self.delete_btn.setStyleSheet("background-color: #f44336; color: white;")
+        self.delete_btn.clicked.connect(self.delete_product)
+        self.delete_btn.setEnabled(False)  # Ürün seçilene kadar devre dışı
+        layout.addWidget(self.delete_btn)
         
         # Uyarı etiketi
         warning_label = QLabel(
@@ -492,25 +574,67 @@ class DeleteProductTab(QWidget):
             "Ürünle ilgili tüm stok hareketleri de silinecektir.")
         warning_label.setStyleSheet("color: red;")
         layout.addWidget(warning_label)
-
-        self.update_product_list()
-
-    def update_product_list(self):
-        """Combobox'a ürünleri doldur"""
-        self.product_combo.clear()
-        self.products = self.db.list_products()
-        for product in self.products:
-            self.product_combo.addItem(f"{product['name']} (Barkod: {product['barcode']})", product['id'])
-
+    
+    def handle_barcode(self, barcode):
+        """Barkod tarayıcıdan gelen değeri işle"""
+        self.search_edit.setText(barcode)
+        self.search_product()
+        
+    def search_product(self):
+        """Ürün adı veya barkod ile ürün ara"""
+        query = self.search_edit.text().strip()
+        if not query:
+            QMessageBox.information(self, "Bilgi", "Lütfen bir arama terimi girin.")
+            return
+        
+        # Önce barkod ile birebir eşleşme ara (tam eşleşme)
+        product = self.db.find_product_by_barcode(query)
+        
+        if not product:
+            # Barkod eşleşmesi bulunamadıysa, ad ile ara (içinde geçen)
+            cur = self.db.conn.cursor()
+            cur.execute(
+                """
+                SELECT id, name, barcode, location
+                FROM Product 
+                WHERE name LIKE ? OR barcode LIKE ?
+                LIMIT 1  -- Sadece ilk eşleşmeyi al
+                """, 
+                (f'%{query}%', f'%{query}%')
+            )
+            product = cur.fetchone()
+        
+        if not product:
+            self.product_info.setText(f"'{query}' ile eşleşen ürün bulunamadı.")
+            self.delete_btn.setEnabled(False)
+            self.current_product = None
+            return
+        
+        # Ürün stok bilgisini al
+        stock = self.db.get_stock_level(product["id"])
+        
+        # Ürün bilgisini göster
+        self.product_info.setText(
+            f"ÜRÜN BİLGİSİ:\n"
+            f"Ad: {product['name']}\n"
+            f"Barkod: {product['barcode']}\n"
+            f"Konum: {product['location']}\n"
+            f"Stok: {stock}"
+        )
+        
+        # Silme butonunu etkinleştir
+        self.delete_btn.setEnabled(True)
+        self.current_product = product
+        
     def delete_product(self):
-        """Seçilen ürünü sil"""
-        if self.product_combo.currentIndex() < 0:
+        """Bulunan ürünü sil"""
+        if not self.current_product:
             QMessageBox.warning(self, "Seçim Yapın", "Silmek için bir ürün seçmelisiniz.")
             return
-
-        product_id = self.product_combo.currentData()
-        product_name = self.product_combo.currentText().split(" (Barkod:")[0]
-
+        
+        product_id = self.current_product["id"]
+        product_name = self.current_product["name"]
+        
         # Silme onayı al
         confirm = QMessageBox.question(
             self,
@@ -519,16 +643,18 @@ class DeleteProductTab(QWidget):
             "Bu işlem geri alınamaz!",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-
+        
         if confirm == QMessageBox.StandardButton.Yes:
             success = self.db.delete_product(product_id)
             if success:
                 QMessageBox.information(self, "Başarılı", f"{product_name} ürünü başarıyla silindi.")
-                self.update_product_list()
+                self.search_edit.clear()
+                self.product_info.setText("Silmek için bir ürün arayın")
+                self.delete_btn.setEnabled(False)
+                self.current_product = None
                 self.refresh_products()  # Ana ürün listesini güncelle
             else:
                 QMessageBox.critical(self, "Hata", "Ürün silinirken bir hata oluştu.")
-
 
 # -------- Rapor Sekmesi -----------------------------------------
 class ReportTab(QWidget):
@@ -814,3 +940,4 @@ class MainWindow(QMainWindow):
         """Pencere kapatıldığında veritabanı bağlantısını kapat"""
         self.db.close()
         event.accept()
+
