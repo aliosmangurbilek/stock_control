@@ -30,6 +30,7 @@ class BarcodeHandler(QObject):
         self.timer = QTimer()
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.process_buffer)
+        self.enter_consumed = False  # Enter tuşunun tüketilip tüketilmediğini izlemek için
         
     def eventFilter(self, obj, event):
         """QLineEdit bileşenine bağlanan olay filtresi"""
@@ -40,7 +41,12 @@ class BarcodeHandler(QObject):
             if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 if self.buffer:
                     self.process_buffer()
+                    self.enter_consumed = True  # Enter tuşunu tüket
                     return True  # Olayı tüket
+                else:
+                    # Buffer boşsa, normal Enter davranışına izin ver
+                    self.enter_consumed = False
+                    return False
                     
             # Ardışık tuşlar arasındaki zaman farkını kontrol et 
             if self.last_key_time > 0:
@@ -57,6 +63,12 @@ class BarcodeHandler(QObject):
                 
             self.last_key_time = current_time
             
+        elif isinstance(obj, QLineEdit) and event.type() == event.Type.KeyRelease:
+            # Enter tuşu bırakıldığında ve tüketildiyse, bu olayı da tüket
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.enter_consumed:
+                self.enter_consumed = False
+                return True
+            
         return super().eventFilter(obj, event)
     
     def process_buffer(self):
@@ -67,4 +79,3 @@ class BarcodeHandler(QObject):
                 self.barcode_detected.emit(barcode)
             self.buffer = ""
             self.last_key_time = 0
-
