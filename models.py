@@ -175,16 +175,23 @@ class DatabaseManager:
         cur = self.conn.cursor()
         cur.execute(
             """
-            SELECT p.name,
-                   SUM(CASE WHEN sm.change<0 THEN -sm.change ELSE 0 END)
-                        AS sold_qty,
-                   SUM(CASE WHEN sm.change<0
-                            THEN -sm.change*p.unit_price ELSE 0 END)
-                        AS revenue
+            SELECT 
+                p.name,
+                SUM(CASE 
+                    WHEN sm.change < 0 AND sm.reason = 'SALE' THEN -sm.change
+                    WHEN sm.change > 0 AND sm.reason = 'ADJUST' THEN -sm.change
+                    ELSE 0 
+                END) AS sold_qty,
+                SUM(CASE 
+                    WHEN sm.change < 0 AND sm.reason = 'SALE' THEN -sm.change*p.unit_price
+                    WHEN sm.change > 0 AND sm.reason = 'ADJUST' THEN -sm.change*p.unit_price
+                    ELSE 0 
+                END) AS revenue
             FROM StockMovement sm
             JOIN Product p ON p.id = sm.product_id
             WHERE DATE(sm.timestamp) = DATE('now', 'localtime')
             GROUP BY p.id
+            HAVING sold_qty > 0
             ORDER BY sold_qty DESC;
             """
         )                         # sorgu örnekleri :contentReference[oaicite:1]{index=1}
