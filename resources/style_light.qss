@@ -1,0 +1,172 @@
+/* ─────────────────────────  GLOBAL  ───────────────────────── */
+* {
+    font-size: 26px;
+}
+
+/* ───────────────────────  ANA PENCERE  ────────────────────── */
+QMainWindow, QDialog {
+    background-color: #FFFFFF;
+    color: #202020;
+}
+
+/* ───────────────────────  SEKME BAŞLIKLARI  ───────────────── */
+QTabWidget::pane {
+    border: 1px solid #CCCCCC;
+    background-color: #F7F7F7;
+    border-radius: 3px;
+}
+
+QTabBar::tab {
+    background-color: #E0E0E0;
+    color: #404040;
+    padding: 14px 30px;
+    border: 1px solid #CCCCCC;
+    border-bottom: none;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+}
+
+QTabBar::tab:selected {
+    background-color: #0078D7;
+    color: #FFFFFF;
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: #D0D0D0;
+}
+
+/* ─────────────────────────  TABLOLAR  ─────────────────────── */
+QTableWidget {
+    background-color: #FFFFFF;
+    alternate-background-color: #F7F7F7;
+    color: #202020;
+    gridline-color: #CCCCCC;
+    border: 1px solid #CCCCCC;
+    border-radius: 3px;
+}
+
+QTableWidget::item {
+    padding: 6px;
+}
+
+QTableWidget::item:selected {
+    background-color: #0078D7;
+    color: #FFFFFF;
+}
+
+QHeaderView::section {
+    background-color: #E9E9E9;
+    color: #202020;
+    padding: 12px;
+    border: none;
+    border-right: 1px solid #CCCCCC;
+    border-bottom: 1px solid #CCCCCC;
+}
+
+/* Dikey başlık (satır numaraları) */
+QHeaderView::section:vertical {
+    min-width: 42px;
+    padding: 0 6px;
+    background-color: #E9E9E9;
+    color: #202020;
+    qproperty-alignment: AlignCenter;
+}
+
+QTableCornerButton::section {
+    background-color: #E9E9E9;
+    border: 1px solid #CCCCCC;
+}
+
+/* ─────────────────────  FORM ELEMANLARI  ──────────────────── */
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+    background-color: #FFFFFF;
+    color: #202020;
+    border: 1px solid #AAAAAA;
+    border-radius: 3px;
+    padding: 10px 12px;
+    min-height: 48px;
+}
+
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+    border: 1px solid #0078D7;
+}
+
+QFormLayout > QLabel {
+    min-width: 165px;
+    padding-right: 10px;
+    color: #202020;
+}
+
+/* ──────────────────────────  BUTONLAR  ────────────────────── */
+QPushButton {
+    background-color: #0078D7;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 3px;
+    padding: 14px 26px;
+    min-width: 140px;
+    min-height: 52px;
+}
+
+QPushButton:hover   { background-color: #1C97EA; }
+QPushButton:pressed { background-color: #005A9E; }
+
+/* Özel sınıflandırılmış butonlar */
+QPushButton[class="danger"]  { background-color: #E81123; }
+QPushButton[class="danger"]:hover  { background-color: #F1707A; }
+
+QPushButton[class="success"] { background-color: #107C10; }
+QPushButton[class="success"]:hover { background-color: #14A614; }
+
+/* ─────────────────────────  GROUP BOX  ────────────────────── */
+QGroupBox {
+    background-color: #F7F7F7;
+    border: 1px solid #CCCCCC;
+    border-radius: 3px;
+    margin-top: 1.5em;
+    padding-top: 18px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 10px;
+    color: #404040;
+}
+
+/* ──────────────────────────  LABELS  ──────────────────────── */
+QLabel {
+    padding: 6px;
+    color: #202020;
+}
+
+QLabel[class="info"]    { color: #0078D7; }
+QLabel[class="warning"] { color: #CC7A00; }
+QLabel[class="error"]   { color: #B8000F; }
+QLabel[class="success"] { color: #107C10; }
+
+/* ────────────────────────  CHECKBOXES  ────────────────────── */
+QCheckBox {
+    color: #202020;
+    spacing: 10px;
+}
+
+QCheckBox::indicator {
+    width: 28px;
+    height: 28px;
+}
+
+QCheckBox::indicator:unchecked {
+    border: 1px solid #AAAAAA;
+    background-color: #FFFFFF;
+}
+
+QCheckBox::indicator:checked {
+    border: 1px solid #0078D7;
+    background-color: #0078D7;
+}
+
+/* ───────────────────  FORM LAYOUT SPACING  ────────────────── */
+QFormLayout {
+    spacing: 14px;
+}
