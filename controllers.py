@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox, QSpinBox, QComboBox, QMainWindow, QFileDialog,
     QCheckBox, QGroupBox, QHeaderView
 )
+from PyQt6.QtGui import QShortcut, QKeySequence
 from PyQt6.QtCore import Qt
 from models import DatabaseManager
 from reports import export_daily_sales
@@ -17,6 +18,12 @@ from barcode_handler import BarcodeHandler
 # Fix the datetime import to properly access strptime
 from datetime import datetime
 
+def tune_table(table: QTableWidget) -> None:
+    """Satır başlıklarını içeriğe göre genişletir ve ortalar."""
+    vh = table.verticalHeader()
+    vh.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+    vh.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+
 # -------- Ürünler sekmesi -------------------------------------------
 class ProductTab(QWidget):
     def __init__(self, db: DatabaseManager):
@@ -24,12 +31,12 @@ class ProductTab(QWidget):
         self.db = db
 
         layout = QVBoxLayout(self)
-        self.table = QTableWidget(0, 7)  # 7 sütun olarak değiştirdik (stok ekledik)
+        self.table = QTableWidget(0, 7)  # 7 sütun (stok ekledik)
         self.table.setHorizontalHeaderLabels(
             ["ID", "Ürün Adı", "Barkod", "Konum", "İlk Fiyat", "Güncel Fiyat", "Stok"]
         )
         layout.addWidget(self.table)
-
+        tune_table(self.table)  # satır numaraları görünür
         self.refresh()
 
     def refresh(self):
@@ -41,12 +48,11 @@ class ProductTab(QWidget):
             r = self.table.rowCount()
             self.table.insertRow(r)
             for c, val in enumerate(values):
-                if c in (4, 5):  # İlk ve güncel fiyatları biçimlendir
+                if c in (4, 5):
                     self.table.setItem(r, c, QTableWidgetItem(f"{val:.2f} TL"))
                 else:
                     self.table.setItem(r, c, QTableWidgetItem(str(val)))
 
-        # Sütunları içeriğe göre boyutlandır
         self.table.resizeColumnsToContents()
 
 # -------- Ürün Arama sekmesi ---------------------------------------
@@ -56,14 +62,13 @@ class SearchProductTab(QWidget):
         self.db = db
 
         layout = QVBoxLayout(self)
-        
         # Arama alanı
         search_layout = QHBoxLayout()
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Ürün adı veya barkod ile arama yapın...")
         self.search_edit.returnPressed.connect(self.search_products)
         search_layout.addWidget(self.search_edit)
-        
+
         # Barkod okuyucu entegrasyonu
         self.barcode_handler = BarcodeHandler()
         self.search_edit.installEventFilter(self.barcode_handler)
@@ -72,16 +77,17 @@ class SearchProductTab(QWidget):
         search_btn = QPushButton("Ara")
         search_btn.clicked.connect(self.search_products)
         search_layout.addWidget(search_btn)
-        
+
         layout.addLayout(search_layout)
-        
+
         # Sonuçlar tablosu
         self.results_table = QTableWidget(0, 5)
         self.results_table.setHorizontalHeaderLabels(
             ["ID", "Ürün Adı", "Barkod", "Konum", "Stok"]
         )
         layout.addWidget(self.results_table)
-        
+        tune_table(self.results_table)
+
         # Bilgi etiketi
         self.info_label = QLabel("Arama yapmak için yukarıdaki kutuya ürün adı veya barkod girin.")
         self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -163,7 +169,14 @@ class AddProductTab(QWidget):
 
         add_btn = QPushButton("Ürün Ekle")
         add_btn.clicked.connect(self.add_product)
+        add_btn.setDefault(True)      # Enter = Ürün Ekle
+        add_btn.setAutoDefault(True)
         form.addRow(add_btn)
+
+        # Sekmedeki her yerde Enter => add_product (Return + Enter)
+        for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            sc = QShortcut(QKeySequence(key), self)
+            sc.activated.connect(self.add_product)
 
     def handle_barcode(self, barcode):
         """Barkod tarayıcıdan gelen değeri otomatik doldur"""
@@ -181,6 +194,12 @@ class AddProductTab(QWidget):
         location = self.location_edit.text().strip()
         price = self.price_edit.value()
         quantity = self.quantity_edit.value()
+
+        QMessageBox.information(
+            self,
+            "Başarılı",
+            f"'{name}' ürünü sisteme eklendi."
+        )
 
         try:
             product_id = self.db.add_product(name, barcode, location, price)
@@ -211,6 +230,10 @@ class SalesTab(QWidget):
         self.cart = {}
         self.processing_barcode = False  # İşlem yapılıp yapılmadığını kontrol eden bayrak
 
+        for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            sc = QShortcut(QKeySequence(key), self)
+            sc.activated.connect(self.scan)
+
         v = QVBoxLayout(self)
 
         # Barkod giriş satırı
@@ -235,9 +258,10 @@ class SalesTab(QWidget):
 
         # Sepet tablosu
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(
-            ["Ürün", "Adet", "Birim", "Toplam"]
-        )
+        self.table.setHorizontalHeaderLabels(["Ürün", "Adet", "Birim", "Toplam"])
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        tune_table(self.table)
         # Tablo seçim davranışını satır bazlı yap
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -369,7 +393,7 @@ class SalesTab(QWidget):
         self.refresh()
         QMessageBox.information(self, "Satış Tamamlandı", "Satış başarıyla tamamlandı.")
 
-# -------- Stok Girişi sekmesi -----------------------------
+# -------- Stok Girişi sekmesi --------------------------------------
 class StockInTab(QWidget):
     def __init__(self, db: DatabaseManager, refresh_products):
         super().__init__()
@@ -380,7 +404,7 @@ class StockInTab(QWidget):
         form = QFormLayout(self)
         self.barcode_edit = QLineEdit()
 
-        # Barkod okuyucu desteği ekle
+        # Barkod okuyucu entegrasyonu
         self.barcode_handler = BarcodeHandler()
         self.barcode_edit.installEventFilter(self.barcode_handler)
         self.barcode_handler.barcode_detected.connect(self.handle_barcode)
@@ -388,63 +412,56 @@ class StockInTab(QWidget):
         self.qty_spin = QSpinBox(); self.qty_spin.setRange(1, 9999)
         self.product_info_label = QLabel("Ürün bilgisi: ")
 
-        # Fiyat bilgileri ve güncelleme seçeneği
+        # Fiyat bilgileri grubu
         self.price_group = QGroupBox("Fiyat Bilgileri")
         price_layout = QFormLayout()
-
         self.current_price_label = QLabel("0.00 TL")
         self.initial_price_label = QLabel("0.00 TL")
-
-        # Yeni fiyat güncelleme alanı
-        self.new_price_spin = QDoubleSpinBox()
-        self.new_price_spin.setMaximum(1_000_000)
+        self.new_price_spin = QDoubleSpinBox(maximum=1_000_000)
         self.update_price_check = QCheckBox("Birim fiyatı güncelle")
-
         price_layout.addRow("İlk Alış Fiyatı:", self.initial_price_label)
         price_layout.addRow("Güncel Birim Fiyat:", self.current_price_label)
         price_layout.addRow("Yeni Alış Fiyatı:", self.new_price_spin)
         price_layout.addRow(self.update_price_check)
-
         self.price_group.setLayout(price_layout)
-        self.price_group.setEnabled(False)  # Başlangıçta devre dışı
+        self.price_group.setEnabled(False)
 
         form.addRow("Barkod", self.barcode_edit)
         form.addRow("Miktar", self.qty_spin)
         form.addRow(self.product_info_label)
         form.addRow(self.price_group)
 
+        # --- Stok Ekle butonu + Enter kısayolu ---
         add_btn = QPushButton("Stok Ekle")
         add_btn.clicked.connect(self.add_stock)
+        add_btn.setDefault(True)
+        add_btn.setAutoDefault(True)
         form.addRow(add_btn)
 
-    def handle_barcode(self, barcode):
-        """Barkod tarayıcıdan gelen değeri otomatik doldur"""
-        self.barcode_edit.setText(barcode)
+        # Sekme odaktayken Enter => add_stock
+        for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            sc = QShortcut(QKeySequence(key), self)
+            sc.activated.connect(self.add_stock)
 
-        # Otomatik ürün bilgilerini getir
+                        # --------------- barkod geldiğinde --------------------------------
+    def handle_barcode(self, barcode):
+        self.barcode_edit.setText(barcode)
         product = self.db.find_product_by_barcode(barcode)
         if product:
-            # Ürün bulunduğunda bilgileri göster
             self.current_product = product
             self.product_info_label.setText(f"Ürün: {product['name']}")
             self.initial_price_label.setText(f"{product['initial_price']:.2f} TL")
             self.current_price_label.setText(f"{product['unit_price']:.2f} TL")
-
-            # Yeni fiyat için mevcut fiyatı öner
             self.new_price_spin.setValue(product['unit_price'])
-
-            # Fiyat güncelleme alanlarını etkinleştir
             self.price_group.setEnabled(True)
-
-            # Miktar alanına odaklan
-            self.qty_spin.setFocus()
-            self.qty_spin.selectAll()
+            self.qty_spin.setFocus(); self.qty_spin.selectAll()
         else:
             self.current_product = None
             self.product_info_label.setText("Ürün bulunamadı!")
             self.price_group.setEnabled(False)
             QMessageBox.warning(self, "Bulunamadı", "Barkod kayıtlı değil.")
 
+                        # --------------- stok ekleme --------------------------------------
     def add_stock(self):
         if not self.current_product:
             code = self.barcode_edit.text().strip()
@@ -454,79 +471,37 @@ class StockInTab(QWidget):
                 return
             self.current_product = row
 
-        qty = self.qty_spin.value()
-        new_price = self.new_price_spin.value()
+        qty = self.qty_spin.value(); new_price = self.new_price_spin.value()
         product_id = self.current_product["id"]
-
-        # Stok girişini yap ve yeni fiyatı kaydet
         try:
-            # Önce stok girişini yap
-            self.db.change_stock(
-                product_id,
-                qty,
-                "PURCHASE",
-                new_price
-            )
-
-            # Birim fiyatı güncelleme onaylandıysa
+            self.db.change_stock(product_id, qty, "PURCHASE", new_price)
             price_updated = False
             if self.update_price_check.isChecked():
-                # Fiyat güncelle ve sonucu kontrol et
-                if self.db.update_unit_price(product_id, new_price):
-                    price_updated = True
-                else:
-                    # Veritabanı bağlantısını yenilemeyi dene
+                if not self.db.update_unit_price(product_id, new_price):
                     self.db.refresh_connection()
-
-                    # Tekrar güncelleme işlemini dene
-                    if self.db.update_unit_price(product_id, new_price):
-                        price_updated = True
-                    else:
-                        QMessageBox.warning(
-                            self,
-                            "Uyarı",
-                            "Fiyat güncelleme işlemi başarısız oldu. Veri kaydedildi ancak fiyat güncellenmedi."
-                        )
-
-            # İşlem başarılı mesajı
+                    price_updated = self.db.update_unit_price(product_id, new_price)
+                else:
+                    price_updated = True
             message = f"{qty} adet stok eklendi."
             if price_updated:
                 message += f"\nBirim fiyat {new_price:.2f} TL olarak güncellendi."
-
             QMessageBox.information(self, "Tamam", message)
-
-            # Tüm UI bileşenlerini güncelle
             self.force_ui_update()
-
         except Exception as e:
-            QMessageBox.critical(self, "Hata", f"İşlem sırasında bir hata oluştu: {str(e)}")
+            QMessageBox.critical(self, "Hata", f"İşlem sırasında hata: {e}")
             return
+        # Alanları temizle
+        self.barcode_edit.clear(); self.qty_spin.setValue(1)
+        self.product_info_label.setText("Ürün bilgisi: "); self.price_group.setEnabled(False)
+        self.update_price_check.setChecked(False); self.current_product = None
 
-        # İşlem başarılı, alanları temizle
-        self.barcode_edit.clear()
-        self.qty_spin.setValue(1)
-        self.product_info_label.setText("Ürün bilgisi: ")
-        self.price_group.setEnabled(False)
-        self.update_price_check.setChecked(False)
-        self.current_product = None
-
+                    # --------------- UI güncelle --------------------------------------
     def force_ui_update(self):
-        """UI'daki tüm ilgili bileşenleri günceller"""
-        # Ana pencereye referans al
         main_window = self.window()
-
-        # Ürünler sekmesini güncelle
-        if hasattr(main_window, 'product_tab'):
-            main_window.product_tab.refresh()
-
-        # Veritabanı bağlantısını yenile ve diğer sekmeleri güncelle
-        self.db.refresh_connection()
-        self.refresh_products()
-
-        # Arama sekmesini de güncelle
+        if hasattr(main_window, 'product_tab'): main_window.product_tab.refresh()
+        self.db.refresh_connection(); self.refresh_products()
         if hasattr(main_window, 'search_tab') and main_window.search_tab.search_edit.text():
             main_window.search_tab.search_products()
-
 
 # -------- Ürün Silme sekmesi --------------------------------------
 class DeleteProductTab(QWidget):
@@ -668,7 +643,7 @@ class ReportTab(QWidget):
         layout.addWidget(QLabel("Günlük Satış Raporu"))
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Ürün", "Satış Adedi", "Gelir"])
-        layout.addWidget(self.table)
+        tune_table(self.table)
 
         # Excel butonu
         export_btn = QPushButton("Excel'e Aktar")
@@ -746,8 +721,13 @@ class PriceHistoryTab(QWidget):
         search_btn = QPushButton("Ara")
         search_btn.clicked.connect(self.search_products)
         search_layout.addWidget(search_btn)
+        search_btn.setDefault(True)
+        search_btn.setAutoDefault(True)
 
         layout.addLayout(search_layout)
+
+        for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            QShortcut(QKeySequence(key), self, activated=self.search_products)
 
         # Ürün seçme listesi
         self.product_combo = QComboBox()
@@ -764,7 +744,7 @@ class PriceHistoryTab(QWidget):
         layout.addWidget(QLabel("Fiyat Geçmişi:"))
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Tarih", "Alış Fiyatı", "Değişim"])
-        layout.addWidget(self.table)
+        tune_table(self.table)
 
         # Tablo ayarları
         header = self.table.horizontalHeader()

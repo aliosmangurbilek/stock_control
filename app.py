@@ -33,7 +33,7 @@ def main() -> None:
         sys.exit(1)
 
     win = MainWindow()                                # Ana pencere: sekmeli yapı :contentReference[oaicite:3]{index=3}
-    win.resize(900, 600)
+    win.resize(1200, 900)
     win.show()                                        # Pencereyi gösterir; olay döngüsü tetiklenir
 
     sys.exit(app.exec())                              # exec(): döngü sonlandığında çıkış :contentReference[oaicite:4]{index=4}
