@@ -25,7 +25,15 @@ class DatabaseManager:
         self.conn.row_factory = sqlite3.Row
         # Yabancı anahtar kısıtlamalarını etkinleştir
         self.conn.execute("PRAGMA foreign_keys = ON")
+        # Veri bütünlüğü için synchronous modunu FULL olarak ayarla
+        self.conn.execute("PRAGMA synchronous = FULL")
+        # Başlangıçta veritabanını diske yazalım
+        self.conn.execute("PRAGMA wal_checkpoint(FULL)")
         self._ensure_schema()
+        # İşlem sayacı ekleyelim
+        self.transaction_count = 0
+        # İşlem sayacı eşiği (kaç işlemde bir diske yazılacak)
+        self.checkpoint_threshold = 50
 
     def _ensure_schema(self) -> None:
         """Tabloları oluşturur ve gerekli sütun/index eklemelerini yapar."""
@@ -71,13 +79,30 @@ class DatabaseManager:
         self.conn.commit()
         logging.info("Veritabanı şeması hazır. Path: %s", self.db_path)
 
+    def _checkpoint_if_needed(self) -> None:
+        """İşlem sayısı eşiği aşıldığında veritabanını diske yazar"""
+        self.transaction_count += 1
+        if self.transaction_count >= self.checkpoint_threshold:
+            logging.info(f"{self.transaction_count} işlem sonrası veritabanı diske yazılıyor...")
+            try:
+                self.conn.execute("PRAGMA wal_checkpoint(FULL)")
+                self.conn.commit()
+                self.transaction_count = 0
+                logging.info("Veritabanı diske başarıyla yazıldı")
+            except sqlite3.Error as e:
+                logging.error(f"Veritabanı diske yazılırken hata: {e}")
+
     def refresh_connection(self) -> bool:
         """Mevcut bağlantıyı kapatıp, aynı ayarlarla yeniden açar."""
         try:
+            # Diske yazma işlemini zorla
+            self.conn.execute("PRAGMA wal_checkpoint(FULL)")
             self.conn.close()
             self.conn = sqlite3.connect(self.db_path)
             self.conn.row_factory = sqlite3.Row
             self.conn.execute("PRAGMA foreign_keys = ON")
+            self.conn.execute("PRAGMA synchronous = FULL")
+            self.transaction_count = 0
             return True
         except sqlite3.Error as e:
             logging.error("Veritabanı yeniden bağlanamadı: %s", e)
@@ -94,7 +119,9 @@ class DatabaseManager:
             (name, barcode, location, unit_price, unit_price),
         )
         self.conn.commit()
-        return cur.lastrowid
+        product_id = cur.lastrowid
+        self._checkpoint_if_needed()
+        return product_id
 
     def list_products(self) -> List[sqlite3.Row]:
         """Tüm ürünleri getirir."""
@@ -134,6 +161,9 @@ class DatabaseManager:
             # Commit the changes
             self.conn.commit()
 
+            # İşlem sonrası kontrol et
+            self._checkpoint_if_needed()
+
             logging.info(f"Ürün ve ilişkili stok hareketleri silindi: ID={product_id}")
             return cur.rowcount > 0
         except sqlite3.Error as e:
@@ -153,6 +183,7 @@ class DatabaseManager:
                 (product_id, qty, reason, purchase_price),
             )
             self.conn.commit()
+            self._checkpoint_if_needed()
             return True
         except sqlite3.Error as e:
             logging.error("Stok değişikliği hatası: %s", e)
@@ -168,6 +199,7 @@ class DatabaseManager:
                 (new_price, product_id)
             )
             self.conn.commit()
+            self._checkpoint_if_needed()
             return True
         except sqlite3.Error as e:
             logging.error("Birim fiyat güncelleme hatası: %s", e)
@@ -187,22 +219,26 @@ class DatabaseManager:
     def daily_sales_report(self) -> List[sqlite3.Row]:
         """Bugünün satış adedi ve gelir raporunu döner."""
         cur = self.conn.cursor()
+        # Get today's date in YYYY-MM-DD format to use in LIKE comparison
+        today = datetime.now().strftime("%Y-%m-%d")
+
         cur.execute(
             """
-            SELECT
-                p.name AS product_name,
-                SUM(CASE WHEN sm.change < 0 AND sm.reason = 'SALE' THEN -sm.change ELSE 0 END) AS sold_qty,
-                SUM(CASE WHEN sm.change < 0 AND sm.reason = 'SALE' THEN -sm.change * COALESCE(sm.purchase_price, p.unit_price) ELSE 0 END) AS revenue
+            SELECT 
+                p.name,
+                SUM(-sm.change) AS sold_qty,
+                SUM(-sm.change * p.unit_price) AS revenue
             FROM StockMovement sm
             JOIN Product p ON p.id = sm.product_id
-            WHERE DATE(sm.timestamp) = DATE('now', 'localtime')
+            WHERE sm.reason = 'SALE'
+              AND sm.timestamp LIKE ?
             GROUP BY p.id
             HAVING sold_qty > 0
             ORDER BY sold_qty DESC;
-            """
+            """,
+            (f"{today}%",)  # Match any timestamp that starts with today's date
         )
-        rows = cur.fetchall()
-        return rows
+        return cur.fetchall()
 
     # ---------- Fiyat takibi ----------
     def get_product_price_history(self, product_id: int) -> List[sqlite3.Row]:
@@ -232,4 +268,13 @@ class DatabaseManager:
 
     def close(self) -> None:
         """Bağlantıyı kapatır."""
-        self.conn.close()
+        try:
+            # Veriyi diske yazma işlemini zorla
+            self.conn.execute("PRAGMA wal_checkpoint(FULL)")
+            self.conn.commit()
+            logging.info("Veritabanı kapatılırken diske yazıldı")
+        except sqlite3.Error as e:
+            logging.error(f"Veritabanı kapatma hatası: {e}")
+        finally:
+            self.conn.close()
+

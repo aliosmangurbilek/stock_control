@@ -6,10 +6,12 @@ app.py ― Uygulamanın giriş noktası
 """
 
 import sys
+import logging
 import platform
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtCore import QTimer
 
 # Yerel modüller
 from controllers import MainWindow
@@ -71,6 +73,11 @@ def main() -> None:
     db = DatabaseManager()
     db.conn.execute("PRAGMA foreign_keys = ON")
     try:
+        # Uygulama açılışında veritabanını diske yazalım
+        db.conn.execute("PRAGMA wal_checkpoint(FULL)")
+        db.conn.commit()
+        logging.info("Veritabanı açılışta diske yazıldı")
+
         db.list_products()
         db.refresh_connection()
     except Exception as e:
@@ -83,9 +90,19 @@ def main() -> None:
     win.resize(1300, 900)
     win.show()
 
+    # Periyodik olarak veritabanını diske yazacak bir zamanlayıcı oluştur
+    # Her 5 dakikada bir işletim sistemi çökmesi durumlarına karşı önlem
+    checkpoint_timer = QTimer()
+    checkpoint_timer.timeout.connect(lambda: db.conn.execute("PRAGMA wal_checkpoint(FULL)"))
+    checkpoint_timer.start(5 * 60 * 1000)  # 5 dakika = 300,000 ms
+
+    # QApplication kapatma sinyalini yakala
+    app.aboutToQuit.connect(lambda: db.conn.execute("PRAGMA wal_checkpoint(FULL)"))
+
     sys.exit(app.exec())                   # Olay döngüsü
 
 
 # ------------------------------------------------------------------
 if __name__ == "__main__":
     main()
+
