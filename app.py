@@ -28,7 +28,7 @@ def load_stylesheet(app: QApplication) -> None:
     Çalıştığı platformun tercihine göre style_dark.qss
     veya style_light.qss dosyasını UYGULAR.
     """
-    theme = "dark"  # varsayılan
+    theme = "light"  # varsayılan
 
     # --- Windows: Registry'den oku --------------------------------
     if platform.system() == "Windows":
@@ -50,7 +50,8 @@ def load_stylesheet(app: QApplication) -> None:
         if "light" in gtk_theme or ("gnome" in desktop and "dark" not in gtk_theme):
             theme = "light"
 
-    qss_path = Path(f"resources/style_{theme}.qss")
+    base_dir = Path(__file__).resolve().parent
+    qss_path = base_dir / "resources" / f"style_{theme}.qss"
     if qss_path.exists():
         app.setStyleSheet(qss_path.read_text(encoding="utf-8"))
     else:
@@ -66,13 +67,9 @@ def main() -> None:
     # Tema uygula
     load_stylesheet(app)
 
-    # (İstersen genel font ayarı)
-    # base_font = app.font()
-    # base_font.setPointSize(14)
-    # app.setFont(base_font)
-
     # Veritabanı bağlantısını test et
     db = DatabaseManager()
+    db.conn.execute("PRAGMA foreign_keys = ON")
     try:
         db.list_products()
         db.refresh_connection()
@@ -83,7 +80,7 @@ def main() -> None:
 
     # Ana pencere
     win = MainWindow()
-    win.resize(1200, 900)
+    win.resize(1300, 900)
     win.show()
 
     sys.exit(app.exec())                   # Olay döngüsü

@@ -92,7 +92,7 @@ class SearchProductTab(QWidget):
         self.info_label = QLabel("Arama yapmak için yukarıdaki kutuya ürün adı veya barkod girin.")
         self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.info_label)
-    
+
     def handle_barcode(self, barcode):
         """Barkod tarayıcıdan gelen değer ile otomatik arama yap"""
         self.search_edit.setText(barcode)
@@ -104,7 +104,7 @@ class SearchProductTab(QWidget):
         if not query:
             QMessageBox.information(self, "Bilgi", "Lütfen bir arama terimi girin.")
             return
-            
+
         # Veritabanı sorgusunu gerçekleştir
         cur = self.db.conn.cursor()
         cur.execute(
@@ -113,28 +113,28 @@ class SearchProductTab(QWidget):
             FROM Product 
             WHERE name LIKE ? OR barcode LIKE ?
             ORDER BY name
-            """, 
+            """,
             (f'%{query}%', f'%{query}%')
         )
         products = cur.fetchall()
-        
+
         # Sonuçları tabloya doldur
         self.results_table.setRowCount(0)
-        
+
         if not products:
             self.info_label.setText(f"'{query}' ile eşleşen ürün bulunamadı.")
             return
-            
+
         for product in products:
             stock = self.db.get_stock_level(product["id"])
-            values = [product["id"], product["name"], 
+            values = [product["id"], product["name"],
                       product["barcode"], product["location"], stock]
-            
+
             r = self.results_table.rowCount()
             self.results_table.insertRow(r)
             for c, val in enumerate(values):
                 self.results_table.setItem(r, c, QTableWidgetItem(str(val)))
-        
+
         self.info_label.setText(f"{len(products)} ürün bulundu.")
         self.results_table.resizeColumnsToContents()
 
@@ -269,13 +269,13 @@ class SalesTab(QWidget):
 
         # Butonlar için layout
         buttons_layout = QHBoxLayout()
-        
+
         # Ürün silme butonu
         remove_btn = QPushButton("Seçilen Ürünü Çıkar")
         remove_btn.setStyleSheet("background-color: #ff9800; color: white;")
         remove_btn.clicked.connect(self.remove_selected_item)
         buttons_layout.addWidget(remove_btn)
-        
+
         v.addLayout(buttons_layout)
 
         # Toplam tutar etiketi
@@ -327,8 +327,7 @@ class SalesTab(QWidget):
             )
             return
 
-        # Stok var → satış kaydet
-        self.db.change_stock(pid, -1, "SALE")
+        # Stok var → sepete ekle (stoku azaltma işlemi satış tamamlandığında yapılacak)
         self.cart.setdefault(pid, {"name": name, "price": price, "qty": 0})
         self.cart[pid]["qty"] += 1
         self.refresh()
@@ -339,34 +338,31 @@ class SalesTab(QWidget):
         if selected_row < 0:
             QMessageBox.information(self, "Seçim Yok", "Lütfen sepetten çıkarılacak bir ürün seçin.")
             return
-            
+
         # Seçilen ürünün adını al
         product_name = self.table.item(selected_row, 0).text()
-        
+
         # Ürün ID'sini bul
         product_id = None
         for pid, item in self.cart.items():
             if item["name"] == product_name:
                 product_id = pid
                 break
-                
+
         if product_id is None:
             QMessageBox.warning(self, "Hata", "Seçilen ürün bulunamadı.")
             return
-            
+
         # Sepetteki miktarı azalt
         self.cart[product_id]["qty"] -= 1
-        
+
         # Eğer miktar 0'a düştüyse, ürünü tamamen sepetten çıkar
         if self.cart[product_id]["qty"] <= 0:
             del self.cart[product_id]
-            
-        # Stok durumunu düzelt (satışı iptal et)
-        self.db.change_stock(product_id, 1, "ADJUST")
-        
+
         # Tabloyu güncelle
         self.refresh()
-        
+
         QMessageBox.information(self, "Başarılı", f"'{product_name}' ürünü sepetten çıkarıldı.")
 
     def refresh(self):
@@ -389,9 +385,37 @@ class SalesTab(QWidget):
             QMessageBox.warning(self, "Boş Sepet", "Sepette ürün bulunmuyor.")
             return
 
-        self.cart.clear()
-        self.refresh()
-        QMessageBox.information(self, "Satış Tamamlandı", "Satış başarıyla tamamlandı.")
+        try:
+            # Process each item in the cart and record in the database with SALE reason
+            total_amount = 0
+            for product_id, item in self.cart.items():
+                # Calculate the total for this product
+                subtotal = item["qty"] * item["price"]
+                total_amount += subtotal
+
+                # Record the sale in the database with SALE reason
+                # This ensures it will appear in reports
+                self.db.change_stock(
+                    product_id=product_id,
+                    qty=-item["qty"],  # Negative quantity for sale
+                    reason="SALE"      # Use SALE reason to make it appear in reports
+                )
+
+            # Clear the cart and update UI
+            self.cart.clear()
+            self.refresh()
+            QMessageBox.information(
+                self,
+                "Satış Tamamlandı",
+                f"Toplam {total_amount:.2f} TL değerinde satış başarıyla kaydedildi."
+            )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Hata",
+                f"Satış kaydedilirken bir hata oluştu: {str(e)}"
+            )
 
 # -------- Stok Girişi sekmesi --------------------------------------
 class StockInTab(QWidget):
@@ -510,61 +534,61 @@ class DeleteProductTab(QWidget):
         self.db = db
         self.refresh_products = refresh_products
         self.current_product = None  # Silme için seçilen ürünü tutacak değişken
-        
+
         layout = QVBoxLayout(self)
-        
+
         # Arama alanı
         search_layout = QHBoxLayout()
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Ürün adı veya barkod ile arama yapın...")
         self.search_edit.returnPressed.connect(self.search_product)
         search_layout.addWidget(self.search_edit)
-        
+
         # Barkod okuyucu entegrasyonu
         self.barcode_handler = BarcodeHandler()
         self.search_edit.installEventFilter(self.barcode_handler)
         self.barcode_handler.barcode_detected.connect(self.handle_barcode)
-        
+
         search_btn = QPushButton("Ara")
         search_btn.clicked.connect(self.search_product)
         search_layout.addWidget(search_btn)
-        
+
         layout.addLayout(search_layout)
-        
+
         # Ürün bilgisi etiketi
         self.product_info = QLabel("Silmek için bir ürün arayın")
         self.product_info.setStyleSheet("font-weight: bold; padding: 10px;")
         layout.addWidget(self.product_info)
-        
+
         # Silme butonu - başlangıçta devre dışı
         self.delete_btn = QPushButton("Ürünü Sil")
         self.delete_btn.setStyleSheet("background-color: #f44336; color: white;")
         self.delete_btn.clicked.connect(self.delete_product)
         self.delete_btn.setEnabled(False)  # Ürün seçilene kadar devre dışı
         layout.addWidget(self.delete_btn)
-        
+
         # Uyarı etiketi
         warning_label = QLabel(
             "DİKKAT: Silme işlemi geri alınamaz!\n"
             "Ürünle ilgili tüm stok hareketleri de silinecektir.")
         warning_label.setStyleSheet("color: red;")
         layout.addWidget(warning_label)
-    
+
     def handle_barcode(self, barcode):
         """Barkod tarayıcıdan gelen değeri işle"""
         self.search_edit.setText(barcode)
         self.search_product()
-        
+
     def search_product(self):
         """Ürün adı veya barkod ile ürün ara"""
         query = self.search_edit.text().strip()
         if not query:
             QMessageBox.information(self, "Bilgi", "Lütfen bir arama terimi girin.")
             return
-        
+
         # Önce barkod ile birebir eşleşme ara (tam eşleşme)
         product = self.db.find_product_by_barcode(query)
-        
+
         if not product:
             # Barkod eşleşmesi bulunamadıysa, ad ile ara (içinde geçen)
             cur = self.db.conn.cursor()
@@ -574,20 +598,20 @@ class DeleteProductTab(QWidget):
                 FROM Product 
                 WHERE name LIKE ? OR barcode LIKE ?
                 LIMIT 1  -- Sadece ilk eşleşmeyi al
-                """, 
+                """,
                 (f'%{query}%', f'%{query}%')
             )
             product = cur.fetchone()
-        
+
         if not product:
             self.product_info.setText(f"'{query}' ile eşleşen ürün bulunamadı.")
             self.delete_btn.setEnabled(False)
             self.current_product = None
             return
-        
+
         # Ürün stok bilgisini al
         stock = self.db.get_stock_level(product["id"])
-        
+
         # Ürün bilgisini göster
         self.product_info.setText(
             f"ÜRÜN BİLGİSİ:\n"
@@ -596,20 +620,20 @@ class DeleteProductTab(QWidget):
             f"Konum: {product['location']}\n"
             f"Stok: {stock}"
         )
-        
+
         # Silme butonunu etkinleştir
         self.delete_btn.setEnabled(True)
         self.current_product = product
-        
+
     def delete_product(self):
         """Bulunan ürünü sil"""
         if not self.current_product:
             QMessageBox.warning(self, "Seçim Yapın", "Silmek için bir ürün seçmelisiniz.")
             return
-        
+
         product_id = self.current_product["id"]
         product_name = self.current_product["name"]
-        
+
         # Silme onayı al
         confirm = QMessageBox.question(
             self,
@@ -618,7 +642,7 @@ class DeleteProductTab(QWidget):
             "Bu işlem geri alınamaz!",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        
+
         if confirm == QMessageBox.StandardButton.Yes:
             success = self.db.delete_product(product_id)
             if success:
@@ -639,40 +663,51 @@ class ReportTab(QWidget):
 
         layout = QVBoxLayout(self)
 
-        # Günlük satış raporu tablosu
+          # Başlık
         layout.addWidget(QLabel("Günlük Satış Raporu"))
+
+          # Tablo oluştur ve layout'a ekle
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Ürün", "Satış Adedi", "Gelir"])
         tune_table(self.table)
+        layout.addWidget(self.table)  # ← Bunu ekledik
 
-        # Excel butonu
+          # Excel butonu
         export_btn = QPushButton("Excel'e Aktar")
         export_btn.clicked.connect(self.export_to_excel)
         layout.addWidget(export_btn)
 
-        # Tabloyu doldur
+          # Veriyi yükle
         self.refresh_report()
 
+    def showEvent(self, event):
+        """Sekme gösterildiğinde otomatik yenile."""
+        super().showEvent(event)
+        self.refresh_report()
+        # Sütun genişliklerini de güncellemek iyi olur
+        self.table.resizeColumnsToContents()
+
     def refresh_report(self):
-        """Tabloyu günlük satış verileriyle doldur"""
+        """Tabloyu günlük satış verileriyle doldur."""
         self.table.setRowCount(0)
         sales = self.db.daily_sales_report()
 
         if not sales:
             self.table.setRowCount(1)
             self.table.setSpan(0, 0, 1, 3)
-            self.table.setItem(0, 0, QTableWidgetItem("Bugün için satış kaydı bulunmuyor."))
-            self.table.item(0, 0).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item = QTableWidgetItem("Bugün için satış kaydı bulunmuyor.")
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(0, 0, item)
             return
 
-        # Verileri göster
         for r, row_data in enumerate(sales):
             self.table.insertRow(r)
             for c, value in enumerate(row_data):
-                item = QTableWidgetItem(str(value))
-                if c == 2:  # Para birimi formatı
-                    item = QTableWidgetItem(f"{value:.2f} TL")
-                self.table.setItem(r, c, item)
+                if c == 2:
+                    text = f"{value:.2f} TL"
+                else:
+                    text = str(value)
+                self.table.setItem(r, c, QTableWidgetItem(text))
 
     def export_to_excel(self):
         """Günlük satış raporunu Excel dosyasına aktar"""
@@ -751,6 +786,9 @@ class PriceHistoryTab(QWidget):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+
+        # Add the table to the layout - this was missing
+        layout.addWidget(self.table)
 
     def handle_barcode(self, barcode):
         """Barkod tarayıcıdan gelen değeri işle"""
@@ -920,4 +958,3 @@ class MainWindow(QMainWindow):
         """Pencere kapatıldığında veritabanı bağlantısını kapat"""
         self.db.close()
         event.accept()
-

@@ -1,91 +1,93 @@
-"""
-models.py
-Veri katmanı: SQLite bağlantısı ve CRUD işlemleri.
-"""
+# models.py
+# Veri katmanı: SQLite bağlantısı ve CRUD işlemleri.
 
-import sqlite3                    # Python yerleşik SQLite modülü :contentReference[oaicite:0]{index=0}
+import sqlite3                    # Python yerleşik SQLite modülü
+import logging
 from datetime import datetime, date
 from pathlib import Path
-from typing import List, Tuple, Optional, Any
+from typing import List, Optional
 
-# ✓ Uygulama kök dizininde /data/inventory.db dosyası oluşturur
+# Uygulama kök dizininde /data/inventory.db dosyası oluşturur
 DB_PATH = Path(__file__).resolve().parent / "data" / "inventory.db"
 DB_PATH.parent.mkdir(exist_ok=True)
 
+# Logging yapılandırması
+logging.basicConfig(level=logging.INFO)
+
 class DatabaseManager:
-    """SQLite tabanlı basit DAO (Data‑Access Object)."""
+    """SQLite tabanlı basit DAO (Data Access Object).
+    Veritabanı bağlantı yönetimi, şema oluşturma ve CRUD işlemleri.
+    """
 
     def __init__(self, db_path: Path = DB_PATH):
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
-        self._ensure_schema()     # tablo yoksa oluştur
+        # Yabancı anahtar kısıtlamalarını etkinleştir
+        self.conn.execute("PRAGMA foreign_keys = ON")
+        self._ensure_schema()
 
-    # ---------- Şema --------------------------------------------------
     def _ensure_schema(self) -> None:
+        """Tabloları oluşturur ve gerekli sütun/index eklemelerini yapar."""
         cur = self.conn.cursor()
         # Ürün tablosu
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS Product (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                name        TEXT    NOT NULL,
-                barcode     TEXT    UNIQUE,
-                location    TEXT,
-                unit_price  REAL    DEFAULT 0.0,
-                initial_price REAL  DEFAULT 0.0,
-                created_at  TEXT    DEFAULT CURRENT_TIMESTAMP
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                name           TEXT    NOT NULL,
+                barcode        TEXT    UNIQUE,
+                location       TEXT,
+                unit_price     REAL    DEFAULT 0.0,
+                initial_price  REAL    DEFAULT 0.0,
+                created_at     TEXT    DEFAULT (datetime('now','localtime'))
             );
             """
         )
-        # Mevcut bir tablo varsa initial_price sütununu ekle
-        try:
-            cur.execute("SELECT initial_price FROM Product LIMIT 1")
-        except sqlite3.OperationalError:
-            # initial_price sütunu yoksa ekle
-            cur.execute("ALTER TABLE Product ADD COLUMN initial_price REAL DEFAULT 0.0")
-            # Varolan ürünler için initial_price'ı unit_price ile aynı yap
-            cur.execute("UPDATE Product SET initial_price = unit_price WHERE initial_price = 0.0")
+        # Barkod sütununa index
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_product_barcode ON Product(barcode);"
+        )
 
-        # Stok hareketleri
+        # Stok hareketleri tablosu
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS StockMovement (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                product_id  INTEGER REFERENCES Product (id),
-                change      INTEGER,
-                reason      TEXT    CHECK(reason IN ('SALE','PURCHASE','ADJUST')),
-                purchase_price REAL DEFAULT NULL,
-                timestamp   TEXT    DEFAULT CURRENT_TIMESTAMP
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id     INTEGER,
+                change         INTEGER NOT NULL,
+                reason         TEXT    CHECK(reason IN ('SALE','PURCHASE','ADJUST')) NOT NULL,
+                purchase_price REAL    DEFAULT NULL,
+                timestamp      TEXT    DEFAULT (datetime('now','localtime')),
+                FOREIGN KEY(product_id) REFERENCES Product(id) ON DELETE CASCADE
             );
             """
         )
-        # Mevcut bir tablo varsa purchase_price sütununu ekle
-        try:
-            cur.execute("SELECT purchase_price FROM StockMovement LIMIT 1")
-        except sqlite3.OperationalError:
-            cur.execute("ALTER TABLE StockMovement ADD COLUMN purchase_price REAL DEFAULT NULL")
-        
-        self.conn.commit()
+        # Zaman damgasına index
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_movement_timestamp ON StockMovement(timestamp);"
+        )
 
-    # ---------- Veritabanı Yönetimi -----------------------------------
-    def refresh_connection(self):
-        """Veritabanı bağlantısını yeniler"""
+        self.conn.commit()
+        logging.info("Veritabanı şeması hazır. Path: %s", self.db_path)
+
+    def refresh_connection(self) -> bool:
+        """Mevcut bağlantıyı kapatıp, aynı ayarlarla yeniden açar."""
         try:
-            # Mevcut bağlantıyı kapat
             self.conn.close()
-            # Bağlantıyı yeniden aç
             self.conn = sqlite3.connect(self.db_path)
             self.conn.row_factory = sqlite3.Row
+            self.conn.execute("PRAGMA foreign_keys = ON")
             return True
-        except sqlite3.Error:
+        except sqlite3.Error as e:
+            logging.error("Veritabanı yeniden bağlanamadı: %s", e)
             return False
 
-    # ---------- CRUD: Product ----------------------------------------
+    # ---------- CRUD: Product ----------
     def add_product(self, name: str, barcode: str,
                     location: str, unit_price: float) -> int:
+        """Yeni ürün ekler ve ID döner."""
         cur = self.conn.cursor()
-        # initial_price ile unit_price aynı değere sahip olacak ilk başta
         cur.execute(
             "INSERT INTO Product(name, barcode, location, unit_price, initial_price)"
             " VALUES (?,?,?,?,?)",
@@ -95,57 +97,70 @@ class DatabaseManager:
         return cur.lastrowid
 
     def list_products(self) -> List[sqlite3.Row]:
-        return self.conn.execute("SELECT * FROM Product").fetchall()
+        """Tüm ürünleri getirir."""
+        return self.conn.execute("SELECT * FROM Product ORDER BY name").fetchall()
 
     def get_product_by_id(self, product_id: int) -> Optional[sqlite3.Row]:
-        """Ürünü ID ile getirir"""
+        """ID ile ürün getirir."""
         return self.conn.execute(
-            "SELECT * FROM Product WHERE id=?", (product_id,)
+            "SELECT * FROM Product WHERE id = ?", (product_id,)
         ).fetchone()
 
     def find_product_by_barcode(self, code: str) -> Optional[sqlite3.Row]:
+        """Barkoda göre ürün sorgular."""
         return self.conn.execute(
-            "SELECT * FROM Product WHERE barcode=?", (code,)
+            "SELECT * FROM Product WHERE barcode = ?", (code,)
         ).fetchone()
-        
+
     def delete_product(self, product_id: int) -> bool:
-        """
-        Ürünü ve ilişkili tüm stok hareketlerini siler.
-        Dönüş: İşlem başarılıysa True, değilse False
-        """
+        """Ürünü ve ilişkili stok hareketlerini siler (CASCADE destekli)."""
         try:
+            # First check if the product exists
+            product = self.get_product_by_id(product_id)
+            if not product:
+                logging.error(f"Silinecek ürün bulunamadı: ID={product_id}")
+                return False
+
+            # Begin transaction
+            self.conn.execute("BEGIN TRANSACTION")
+
+            # Delete stock movements first (explicitly, in case CASCADE doesn't work)
             cur = self.conn.cursor()
-            # Önce ilişkili stok hareketlerini sil (foreign key)
-            cur.execute("DELETE FROM StockMovement WHERE product_id=?", (product_id,))
-            # Sonra ürünü sil
-            cur.execute("DELETE FROM Product WHERE id=?", (product_id,))
+            cur.execute("DELETE FROM StockMovement WHERE product_id = ?", (product_id,))
+
+            # Then delete the product
+            cur.execute("DELETE FROM Product WHERE id = ?", (product_id,))
+
+            # Commit the changes
             self.conn.commit()
-            return cur.rowcount > 0  # Silinen satır varsa True
-        except sqlite3.Error:
+
+            logging.info(f"Ürün ve ilişkili stok hareketleri silindi: ID={product_id}")
+            return cur.rowcount > 0
+        except sqlite3.Error as e:
+            logging.error(f"Ürün silme hatası: {str(e)}")
             self.conn.rollback()
             return False
 
-    # ---------- Stok işlemleri ---------------------------------------
+    # ---------- Stok işlemleri ----------
     def change_stock(self, product_id: int, qty: int,
-                     reason: str = "SALE", purchase_price: float = None) -> None:
-        self.conn.execute(
-            "INSERT INTO StockMovement(product_id, change, reason, purchase_price)"
-            " VALUES (?,?,?,?)",
-            (product_id, qty, reason, purchase_price),
-        )
-        self.conn.commit()
-        
+                     reason: str = "SALE", purchase_price: float = None) -> bool:
+        """Stok hareketi kaydeder."""
+        try:
+            cur = self.conn.cursor()
+            cur.execute(
+                "INSERT INTO StockMovement(product_id, change, reason, purchase_price)"
+                " VALUES (?,?,?,?)",
+                (product_id, qty, reason, purchase_price),
+            )
+            self.conn.commit()
+            return True
+        except sqlite3.Error as e:
+            logging.error("Stok değişikliği hatası: %s", e)
+            self.conn.rollback()
+            return False
+
     def update_unit_price(self, product_id: int, new_price: float) -> bool:
-        """
-        Ürünün güncel birim fiyatını günceller
-        
-        Args:
-            product_id: Güncellenecek ürünün ID'si
-            new_price: Yeni birim fiyat
-            
-        Returns:
-            bool: Güncelleme başarılı ise True, değilse False
-        """
+        """Ürün birim fiyatını günceller."""
         try:
             cur = self.conn.cursor()
             cur.execute(
@@ -153,40 +168,31 @@ class DatabaseManager:
                 (new_price, product_id)
             )
             self.conn.commit()
-            # Değişikliklerin veritabanına yazıldığından emin olmak için bağlantıyı yeniliyoruz
-            self.refresh_connection()
-            # Güncellemeyi doğrula
-            updated = self.get_product_by_id(product_id)
-            return updated and abs(updated["unit_price"] - new_price) < 0.01
-        except sqlite3.Error:
+            return True
+        except sqlite3.Error as e:
+            logging.error("Birim fiyat güncelleme hatası: %s", e)
             self.conn.rollback()
             return False
 
     def get_stock_level(self, product_id: int) -> int:
+        """Mevcut stok miktarını hesaplar."""
         row = self.conn.execute(
             "SELECT COALESCE(SUM(change),0) AS qty"
-            " FROM StockMovement WHERE product_id=?",
+            " FROM StockMovement WHERE product_id = ?",
             (product_id,),
         ).fetchone()
         return row["qty"] if row else 0
 
-    # ---------- Günlük satış raporu ----------------------------------
-    def daily_sales_report(self) -> List[Tuple[Any, ...]]:
+    # ---------- Günlük satış raporu ----------
+    def daily_sales_report(self) -> List[sqlite3.Row]:
+        """Bugünün satış adedi ve gelir raporunu döner."""
         cur = self.conn.cursor()
         cur.execute(
             """
-            SELECT 
-                p.name,
-                SUM(CASE 
-                    WHEN sm.change < 0 AND sm.reason = 'SALE' THEN -sm.change
-                    WHEN sm.change > 0 AND sm.reason = 'ADJUST' THEN -sm.change
-                    ELSE 0 
-                END) AS sold_qty,
-                SUM(CASE 
-                    WHEN sm.change < 0 AND sm.reason = 'SALE' THEN -sm.change*p.unit_price
-                    WHEN sm.change > 0 AND sm.reason = 'ADJUST' THEN -sm.change*p.unit_price
-                    ELSE 0 
-                END) AS revenue
+            SELECT
+                p.name AS product_name,
+                SUM(CASE WHEN sm.change < 0 AND sm.reason = 'SALE' THEN -sm.change ELSE 0 END) AS sold_qty,
+                SUM(CASE WHEN sm.change < 0 AND sm.reason = 'SALE' THEN -sm.change * COALESCE(sm.purchase_price, p.unit_price) ELSE 0 END) AS revenue
             FROM StockMovement sm
             JOIN Product p ON p.id = sm.product_id
             WHERE DATE(sm.timestamp) = DATE('now', 'localtime')
@@ -194,52 +200,36 @@ class DatabaseManager:
             HAVING sold_qty > 0
             ORDER BY sold_qty DESC;
             """
-        )                         # sorgu örnekleri :contentReference[oaicite:1]{index=1}
-        return cur.fetchall()
+        )
+        rows = cur.fetchall()
+        return rows
 
-    # ---------- Fiyat Takibi -----------------------------------------
+    # ---------- Fiyat takibi ----------
     def get_product_price_history(self, product_id: int) -> List[sqlite3.Row]:
-        """
-        Bir ürünün fiyat geçmişini getirir.
-        Sadece alış hareketlerindeki (PURCHASE) fiyat değişimlerini içerir.
-        """
+        """Bir ürünün alış fiyatı geçmişini (en yeni önce) getirir."""
         return self.conn.execute(
             """
-            SELECT 
-                sm.timestamp,
-                sm.purchase_price,
-                p.name as product_name
-            FROM StockMovement sm
-            JOIN Product p ON p.id = sm.product_id
-            WHERE sm.product_id = ? 
-              AND sm.reason = 'PURCHASE'
-              AND sm.purchase_price IS NOT NULL
-            ORDER BY sm.timestamp DESC
+            SELECT timestamp, purchase_price
+            FROM StockMovement
+            WHERE product_id = ? AND reason = 'PURCHASE' AND purchase_price IS NOT NULL
+            ORDER BY timestamp DESC
             """,
             (product_id,)
         ).fetchall()
 
     def search_products_for_price_history(self, query: str) -> List[sqlite3.Row]:
-        """
-        Ürünleri ada veya barkoda göre arar
-        """
-        query = f'%{query}%'
+        """Ada veya barkoda göre ürün arar."""
+        term = f"%{query}%"
         return self.conn.execute(
             """
-            SELECT 
-                id, 
-                name, 
-                barcode, 
-                unit_price,
-                initial_price
-            FROM Product 
+            SELECT id, name, barcode, unit_price, initial_price
+            FROM Product
             WHERE name LIKE ? OR barcode LIKE ?
             ORDER BY name
             """,
-            (query, query)
+            (term, term)
         ).fetchall()
 
-    # ---------- Kapat -------------------------------------------------
-    def close(self):
+    def close(self) -> None:
+        """Bağlantıyı kapatır."""
         self.conn.close()
-
