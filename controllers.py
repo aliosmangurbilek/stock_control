@@ -311,10 +311,15 @@ class SalesTab(QWidget):
             return
 
         pid, name, price = (product["id"], product["name"], product["unit_price"])
+        # Veritabanındaki stok
         stok = self.db.get_stock_level(pid)
-        if stok <= 0:
+        # Sepette halihazırda kaç tane var?
+        mevcut_adet = self.cart.get(pid, {}).get("qty", 0)
+
+        # Yeni ekleme ile stok aşılıyorsa vazgeç
+        if stok <= mevcut_adet:
             QMessageBox.warning(self, "Stok Yetersiz",
-                                f"'{name}' için stok kalmamış!")
+                                f"'{name}' için yeterli stok yok! (Mevcut stok: {stok}, Sepet: {mevcut_adet})")
             return
 
         # Sepete ekle
@@ -375,23 +380,31 @@ class SalesTab(QWidget):
             QMessageBox.warning(self, "Boş Sepet", "Sepette ürün bulunmuyor.")
             return
 
+        # Satışı kaydetmeden önce bir kere daha stok kontrolü
+        for pid, item in self.cart.items():
+            stok = self.db.get_stock_level(pid)
+            if stok < item["qty"]:
+                QMessageBox.warning(
+                    self,
+                    "Stok Yetersiz",
+                    f"'{item['name']}' için stok yetersiz! Mevcut stok: {stok}, Sepette: {item['qty']}"
+                )
+                return  # Satışa devam etme
+
         try:
-            # Process each item in the cart and record in the database with SALE reason
             total_amount = 0
             for product_id, item in self.cart.items():
-                # Calculate the total for this product
                 subtotal = item["qty"] * item["price"]
                 total_amount += subtotal
 
-                # Record the sale in the database with SALE reason
-                # This ensures it will appear in reports
+                # Veritabanında stok değişikliği (-qty)
                 self.db.change_stock(
                     product_id=product_id,
-                    qty=-item["qty"],  # Negative quantity for sale
-                    reason="SALE"      # Use SALE reason to make it appear in reports
+                    qty=-item["qty"],
+                    reason="SALE"
                 )
 
-            # Clear the cart and update UI
+            # Sepeti temizle, UI güncelle
             self.cart.clear()
             self.refresh()
             QMessageBox.information(
@@ -482,6 +495,14 @@ class StockInTab(QWidget):
             QMessageBox.warning(self, "Bulunamadı", "Barkod kayıtlı değil.")
 
     def add_stock(self):
+          # Barkod girilmemişse uyar ve çık
+        code = self.barcode_edit.text().strip()
+        if not code:
+            QMessageBox.warning(
+                self,"Barkod Eksik","Lütfen önce bir barkod okutun veya girin."
+                )
+            self.barcode_edit.setFocus()
+            return
         """Butona tıklayınca veya Enter’a basılınca stok ekle."""
         if not self.current_product:
             # kullanıcı doğrudan butona basmışsa barkodu kontrol et
